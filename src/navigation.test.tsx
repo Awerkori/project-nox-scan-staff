@@ -15,7 +15,7 @@ describe('staff panel routes', () => {
     expect(page('/translation')).toContain('Tradução')
     expect(page('/typeset')).toContain('Type')
     expect(page('/review')).toContain('Revisão / QC')
-    expect(page('/ready')).toContain('Prontos para publicação')
+    expect(page('/ready')).toContain('Prontos pra upar')
     expect(page('/works')).toContain('Nova obra')
     expect(page('/notifications')).toContain('Notificações')
     expect(page('/admin/members')).toContain('Pré-autorizar GitHub')
