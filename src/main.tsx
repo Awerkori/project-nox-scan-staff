@@ -14,7 +14,7 @@ type AuthStatus = 'checking-session' | 'unauthenticated' | 'checking-access' | '
 class PanelErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false }
   static getDerivedStateFromError() { return { failed: true } }
-  componentDidCatch(_error: Error, _info: ErrorInfo) { /* The visible fallback intentionally does not expose internal details. */ }
+  componentDidCatch(error: Error, info: ErrorInfo) { void error; void info /* The visible fallback intentionally does not expose internal details. */ }
   render() { return this.state.failed ? <Gate message="Erro ao carregar o painel."><p>Recarregue a página. Se o problema continuar, avise um administrador.</p><button className="primary" onClick={() => window.location.reload()}>Recarregar</button></Gate> : this.props.children }
 }
 
