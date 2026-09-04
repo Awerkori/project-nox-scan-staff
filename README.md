@@ -4,11 +4,12 @@ Painel privado de produção para a staff da Project Nox. O frontend é React + 
 
 ## O que entrega
 
-- Login somente com GitHub OAuth pelo Supabase e allowlist de staff.
+- Login somente com GitHub OAuth, convites por login e reivindicação segura para contas que já fizeram login.
 - Cargos múltiplos, filas automáticas por etapa e workflow RAW → Clean/Tradução paralelos → Type → QC → Pronto.
 - RPCs transacionais para assumir, concluir, reprovar e aprovar tarefas.
 - Notificações persistentes por cargo quando uma fila é liberada; o Realtime atualiza sino e toast para sessões abertas.
-- Arquivos privados e versionados, comentários, atividade, notificações e Realtime.
+- Catálogo editorial separado da produção; o workflow nasce somente quando um Raw Provider assume um item.
+- Arquivos e capas privados, versões reservadas com lock, créditos imutáveis, comentários, atividade, notificações e Realtime.
 - Abstração de storage: Supabase Storage hoje; `TelegramStorageProvider` reservado para uma futura Edge Function/serviço seguro.
 
 ## Segurança
@@ -28,12 +29,12 @@ where lower(github_login) = 'awerkori'
 on conflict do nothing;
 ```
 
-Administradores passam então a adicionar/remover membros e cargos no banco via painel futuro ou Dashboard Supabase. A migration é a fonte da verdade para RLS e não deve ser substituída por lógica de frontend.
+Administradores gerenciam convites, cargos e ativação no painel. O banco impede a remoção concorrente do último administrador ativo; a migration é a fonte da verdade para RLS e integridade.
 
 ## Configuração Supabase
 
 1. Crie um projeto Supabase.
-2. Aplique [`supabase/migrations/20260904180000_initial_production.sql`](supabase/migrations/20260904180000_initial_production.sql) no SQL Editor ou Supabase CLI.
+2. Aplique em ordem todas as migrations de [`supabase/migrations`](supabase/migrations). Considere `20260904220000_works_catalog.sql` pendente até ela aparecer no histórico remoto; `20260904230000_production_integrity.sql` depende dela.
 3. Em **Authentication → Providers**, habilite GitHub e informe Client ID/secret somente no Supabase.
 4. Configure a callback OAuth indicada pelo Supabase (normalmente `https://<project-ref>.supabase.co/auth/v1/callback`) no GitHub OAuth App.
 5. Em **Authentication → URL Configuration**, adicione `https://awerkori.github.io/project-nox-scan-staff/` e a URL local de desenvolvimento como redirect URLs.
