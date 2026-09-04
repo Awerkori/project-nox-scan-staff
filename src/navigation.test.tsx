@@ -18,7 +18,7 @@ describe('staff panel routes', () => {
     expect(page('/ready')).toContain('Prontos pra upar')
     expect(page('/works')).toContain('Nova obra')
     expect(page('/notifications')).toContain('Notificações')
-    expect(page('/admin/members')).toContain('Gerenciamento')
+    expect(page('/admin/members')).toContain('Pré-autorizar GitHub')
     expect(page('/admin/settings')).toContain('Configurações')
   })
 })
