@@ -19,13 +19,23 @@ function App() {
   const [toast, setToast] = useState('')
   const load = useCallback(async () => {
     if (!session || !supabase) return
-    const { data: staff, error: staffError } = await supabase.from('staff_members').select('user_id,github_login,display_name,is_admin,user_roles(roles(code))').eq('user_id', session.user.id).eq('is_active', true).maybeSingle()
-    if (staffError || !staff) { setMember(null); setError('Acesso não autorizado'); return }
-    setMember({ user_id: staff.user_id, github_login: staff.github_login, display_name: staff.display_name, is_admin: staff.is_admin, roles: (staff.user_roles ?? []).flatMap((item: { roles: { code: Role }[] | null }) => item.roles?.map((role) => role.code) ?? []) })
-    const { data, error: chapterError } = await supabase.from('chapters').select('id,number,title,work:works(title),chapter_stages(id,chapter_id,stage,status,assigned_to,assigned_at,completed_at,assignee:profiles!chapter_stages_assigned_to_fkey(display_name,github_login,avatar_url))').order('created_at', { ascending: false }).limit(100)
-    if (chapterError) setError(chapterError.message); else setChapters((data ?? []) as unknown as Chapter[])
-    const { count } = await supabase.from('notifications').select('*', { count: 'exact', head: true }).is('read_at', null)
-    setNotifications(count ?? 0)
+    try {
+      const { data: staff, error: staffError } = await supabase.from('staff_members').select('user_id,github_login,display_name,is_admin,user_roles(roles(code))').eq('user_id', session.user.id).eq('is_active', true).maybeSingle()
+      if (staffError) { setMember(null); setError(`Não foi possível verificar seu acesso: ${staffError.message}`); return }
+      if (!staff) { setMember(null); setError('Acesso não autorizado'); return }
+      type StaffRoleRow = { roles: { code: Role } | null }
+      const staffRoles = (staff.user_roles as StaffRoleRow[] | null) ?? []
+      const roles = staffRoles.flatMap((item) => item.roles?.code ? [item.roles.code] : [])
+      setMember({ user_id: staff.user_id, github_login: staff.github_login, display_name: staff.display_name, is_admin: staff.is_admin, roles })
+      const { data, error: chapterError } = await supabase.from('chapters').select('id,number,title,work:works(title),chapter_stages(id,chapter_id,stage,status,assigned_to,assigned_at,completed_at,assignee:profiles!chapter_stages_assigned_to_fkey(display_name,github_login,avatar_url))').order('created_at', { ascending: false }).limit(100)
+      if (chapterError) { setError(`Não foi possível carregar os capítulos: ${chapterError.message}`); setChapters([]) } else setChapters((data ?? []) as unknown as Chapter[])
+      const { count, error: notificationError } = await supabase.from('notifications').select('*', { count: 'exact', head: true }).is('read_at', null)
+      if (notificationError) setError(`Não foi possível carregar notificações: ${notificationError.message}`)
+      else setNotifications(count ?? 0)
+    } catch (cause) {
+      setMember(null)
+      setError(cause instanceof Error ? `Erro inesperado ao carregar seu acesso: ${cause.message}` : 'Erro inesperado ao carregar seu acesso.')
+    }
   }, [session])
   useEffect(() => {
     if (!supabase) return
