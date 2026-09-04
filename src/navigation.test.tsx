@@ -2,9 +2,9 @@
 import { renderToString } from 'react-dom/server'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it } from 'vitest'
-import { PanelRoutes } from './Panel'
+import { PanelRoutes, type PanelProps } from './Panel'
 
-const props = { member: { user_id: 'admin', github_login: 'Awerkori', display_name: 'Awerkori', is_admin: true, roles: ['ADMIN'] }, chapters: [], notifications: 0, toast: '', refresh: () => undefined, logout: () => undefined }
+const props: PanelProps = { member: { user_id: 'admin', github_login: 'Awerkori', display_name: 'Awerkori', is_admin: true, roles: ['ADMIN'] }, chapters: [], notifications: 0, toast: '', refresh: () => undefined, logout: () => undefined }
 const page = (path: string) => renderToString(<MemoryRouter initialEntries={[path]}><PanelRoutes {...props} /></MemoryRouter>)
 
 describe('staff panel routes', () => {
