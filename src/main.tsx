@@ -24,7 +24,7 @@ function App() {
       if (staffError) { setMember(null); setError(`Não foi possível verificar seu acesso: ${staffError.message}`); return }
       if (!staff) { setMember(null); setError('Acesso não autorizado'); return }
       type StaffRoleRow = { roles: { code: Role } | null }
-      const staffRoles = (staff.user_roles as StaffRoleRow[] | null) ?? []
+      const staffRoles = (staff.user_roles as unknown as StaffRoleRow[] | null) ?? []
       const roles = staffRoles.flatMap((item) => item.roles?.code ? [item.roles.code] : [])
       setMember({ user_id: staff.user_id, github_login: staff.github_login, display_name: staff.display_name, is_admin: staff.is_admin, roles })
       const { data, error: chapterError } = await supabase.from('chapters').select('id,number,title,work:works(title),chapter_stages(id,chapter_id,stage,status,assigned_to,assigned_at,completed_at,assignee:profiles!chapter_stages_assigned_to_fkey(display_name,github_login,avatar_url))').order('created_at', { ascending: false }).limit(100)
