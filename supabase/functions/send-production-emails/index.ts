@@ -1,5 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { deliverEmail, type EmailJob } from "./worker.ts";
+import { deliverEmail, isTestSender, sendConfigurationTest, type EmailJob } from "./worker.ts";
 
 Deno.serve(async (request) => {
   const workerSecret = Deno.env.get("EMAIL_WORKER_SECRET");
@@ -40,6 +40,7 @@ Deno.serve(async (request) => {
         apiKeyConfigured: true,
         fromConfigured: !!config.from,
         providerStatus: response.status,
+        testMode: isTestSender(config.from),
         domains: result.data?.map(
           (domain: { name: string; status: string }) => ({
             name: domain.name,
@@ -60,6 +61,26 @@ Deno.serve(async (request) => {
       console.error(message);
       return Response.json({ error: message }, { status: 503 });
     }
+    if (body.test === true) {
+      try {
+        const result = await sendConfigurationTest(config);
+        console.info("Teste de configuração de e-mail", result.providerMessageId);
+        return Response.json(result);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Falha no teste";
+        console.error("Teste de configuração de e-mail", message);
+        return Response.json({ error: message }, { status: 502 });
+      }
+    }
+    // Do not claim, retry, redirect or mark real recipients as sent in test mode.
+    // Changing only RESEND_FROM to a verified domain enables the normal worker.
+    if (isTestSender(config.from))
+      return Response.json({
+        testMode: true,
+        processed: 0,
+        sent: 0,
+        reason: "Envios para a staff aguardam um domínio verificado em RESEND_FROM",
+      }, { status: 202 });
     const { data, error } = await admin.rpc("claim_production_email_jobs", {
       p_limit: 5,
     });

@@ -81,6 +81,12 @@ select vault.create_secret('O-MESMO-EMAIL_WORKER_SECRET', 'email_worker_secret')
 
 `RESEND_API_KEY` e `EMAIL_WORKER_SECRET` existem somente nos secrets da Edge Function/Vault. O remetente precisa usar um domínio verificado no Resend. Falhas e tentativas ficam disponíveis para administradores em `production_email_outbox.last_error` e não alteram o estado do capítulo.
 
+**Sem domínio próprio (modo de teste):** configure `RESEND_FROM="Project Nox <onboarding@resend.dev>"`. A função reconhece esse remetente e pausa o processamento de destinatários reais **antes** de reservar a fila: não consome tentativas, não redireciona mensagens privadas e não marca avisos como enviados. Notificações no site e produção continuam funcionando.
+
+`node scripts/email-worker.mjs test` envia uma mensagem sintética para `delivered@resend.dev`, o destinatário oficial de simulação do Resend. Exige o segredo do worker, usa idempotência e não altera a outbox. Um retorno `accepted: true` comprova aceitação pela API, **não recebimento na caixa de uma pessoa**. `diagnose` informa `testMode`; `run` retorna HTTP 202 enquanto o remetente for de teste.
+
+Para habilitar destinatários reais, verifique seu domínio em [Resend → Domains](https://resend.com/domains), cadastrando os registros DNS indicados até aparecer **Verified**. Depois basta trocar o secret `RESEND_FROM` por `Project Nox <staff@seudominio.com>`; não exige mudança no frontend, migration ou novo deploy. A fila retoma somente os avisos ainda elegíveis. O domínio compartilhado de teste [não permite enviar para outros membros](https://resend.com/docs/knowledge-base/403-error-resend-dev-domain).
+
 ## Deploy
 
 O workflow [`deploy-pages.yml`](.github/workflows/deploy-pages.yml) executa lint, testes e build antes de publicar no GitHub Pages. Defina o Pages do repositório como **GitHub Actions**. As variáveis públicas `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY` devem ser adicionadas como Variables/Secrets de Actions antes do primeiro deploy funcional; elas não são suficientes para burlar RLS.

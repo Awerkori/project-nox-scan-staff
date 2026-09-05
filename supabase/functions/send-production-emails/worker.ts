@@ -24,6 +24,38 @@ const escape = (text: string) =>
         c
       ]!,
   );
+export const isTestSender = (from: string) =>
+  /@resend\.dev\s*>?\s*$/i.test(from);
+
+// Operator-only probe: no real chapter/member data and no outbox state changes.
+export async function sendConfigurationTest(
+  config: { apiKey: string; from: string; appUrl: string },
+  send: typeof fetch = fetch,
+) {
+  if (!isTestSender(config.from))
+    throw new Error("O teste exige o remetente resend.dev");
+  const response = await send("https://api.resend.com/emails", {
+    method: "POST",
+    signal: AbortSignal.timeout(12000),
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${config.apiKey}`,
+      "Idempotency-Key": "nox/configuration-test/v1",
+    },
+    body: JSON.stringify({
+      from: config.from,
+      to: ["delivered@resend.dev"],
+      subject: "Project Nox — teste de configuração",
+      text: `Teste da integração de e-mail. Não é uma tarefa real.\nAbrir Project Nox: ${config.appUrl}`,
+      html: `<h2>PROJECT NOX</h2><p>Teste da integração de e-mail. Não é uma tarefa real.</p><a href="${escape(config.appUrl)}">Abrir Project Nox</a>`,
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload.id)
+    throw new Error(`${response.status}: ${payload.message || "Resposta inválida do Resend"}`);
+  return { accepted: true, simulatedRecipient: true, providerMessageId: String(payload.id) };
+}
+
 export async function deliverEmail(
   job: EmailJob,
   config: { apiKey: string; from: string; appUrl: string },

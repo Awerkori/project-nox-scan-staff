@@ -63,7 +63,7 @@ try {
           "Content-Type": "application/json",
         },
         body: JSON.stringify(
-          process.argv[2] === "run" ? {} : { diagnose: true },
+          process.argv[2] === "run" ? {} : process.argv[2] === "test" ? { test: true } : { diagnose: true },
         ),
       },
     );
@@ -73,6 +73,7 @@ try {
         result: await response.json(),
       }),
     );
+    if (!response.ok) process.exitCode = 1;
   }
 } catch (error) {
   console.error(

@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   deliverEmail,
+  isTestSender,
+  sendConfigurationTest,
   type EmailJob,
 } from "../supabase/functions/send-production-emails/worker";
 const job: EmailJob = {
@@ -21,6 +23,28 @@ const config = {
   appUrl: "https://example.test/staff/",
 };
 describe("production email delivery", () => {
+  it("recognizes test senders without confusing a verified domain", () => {
+    expect(isTestSender("Project Nox <onboarding@resend.dev>")).toBe(true);
+    expect(isTestSender("ONBOARDING@RESEND.DEV")).toBe(true);
+    expect(isTestSender("staff@resend.dev.example.com")).toBe(false);
+    expect(isTestSender(config.from)).toBe(false);
+  });
+  it("sends only a synthetic, idempotent configuration probe", async () => {
+    const send = vi.fn().mockImplementation(async () => new Response(JSON.stringify({ id: "test-mail" })));
+    const testConfig = { ...config, from: "Project Nox <onboarding@resend.dev>" };
+    expect(await sendConfigurationTest(testConfig, send)).toEqual({ accepted: true, simulatedRecipient: true, providerMessageId: "test-mail" });
+    await sendConfigurationTest(testConfig, send);
+    const body = JSON.parse(send.mock.calls[0][1].body);
+    expect(body.to).toEqual(["delivered@resend.dev"]);
+    expect(body.text).not.toContain(job.work_title);
+    expect(send.mock.calls[0][1].headers["Idempotency-Key"]).toBe(send.mock.calls[1][1].headers["Idempotency-Key"]);
+    await expect(sendConfigurationTest(config, send)).rejects.toThrow("remetente resend.dev");
+    expect(send).toHaveBeenCalledTimes(2);
+  });
+  it("does not report a rejected configuration probe as accepted", async () => {
+    const send = vi.fn().mockResolvedValue(new Response(JSON.stringify({ message: "restricted" }), { status: 403 }));
+    await expect(sendConfigurationTest({ ...config, from: "onboarding@resend.dev" }, send)).rejects.toThrow("403: restricted");
+  });
   it("uses the same idempotency key on retries and links to the chapter", async () => {
     const send = vi
       .fn()
