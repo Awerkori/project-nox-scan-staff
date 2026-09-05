@@ -95,4 +95,6 @@ O app usa `HashRouter`, portanto URLs do Pages não sofrem 404 em rotas internas
 
 `tests/remote-smoke.sql` valida as identidades confirmadas de administrador e Typesetter, bloqueios de RPC, proteção do último admin e reentrada no banco remoto. Todas as escritas de teste são revertidas.
 
+`node scripts/check-production.mjs` abre o Pages publicado em três larguras, verifica o console, o encaminhamento ao GitHub e a negação de acesso anônimo às tabelas/RPCs privadas. Não autentica em nome de outra pessoa nem altera dados. O login GitHub completo precisa ser confirmado pelo titular da conta.
+
 `node scripts/email-worker.mjs setup /caminho/privado/worker.env` configura somente o segredo do worker e URL no Vault/Edge Function, sem imprimir valores. O arquivo deve conter `EMAIL_WORKER_SECRET` (64 caracteres hexadecimais) e `STAFF_APP_URL`; proteja-o e remova-o após a configuração. `diagnose` consulta a configuração e os domínios no Resend; uma chave restrita a envio não pode listar domínios. `run` processa a fila. O remetente deve estar configurado como `RESEND_FROM`. Tentativas usam chave de idempotência estável, backoff e limite de repetição; falhas do disparador ficam em `email_worker_diagnostics`.
