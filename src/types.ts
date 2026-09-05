@@ -40,6 +40,7 @@ export type Chapter = {
   id: string;
   number: string;
   title: string | null;
+  published_at?: string | null;
   work: { id: string; title: string } | null;
   chapter_stages: ChapterStage[];
 };

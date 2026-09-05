@@ -63,6 +63,13 @@ export async function startCatalogProduction(catalogId: string) {
   return data as { id: string };
 }
 
+export async function markChapterPublished(chapterId: string) {
+  const { error } = await client().rpc("mark_chapter_published", {
+    p_chapter_id: chapterId,
+  });
+  if (error) throw error;
+}
+
 export async function reviewChapter(
   stageId: string,
   approved: boolean,
@@ -131,7 +138,11 @@ export async function downloadArtifact(provider: string, key: string) {
     .storage.from("scan-artifacts")
     .createSignedUrl(key, 300, { download: true });
   if (error) throw error;
-  window.location.assign(data.signedUrl);
+  const link = document.createElement("a");
+  link.href = data.signedUrl;
+  link.rel = "noopener";
+  link.download = "";
+  link.click();
 }
 
 export function subscribeToProduction(
@@ -140,6 +151,16 @@ export function subscribeToProduction(
   if (!supabase) return null;
   return supabase
     .channel("production-updates")
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "chapters" },
+      onChange,
+    )
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "work_chapter_catalog" },
+      onChange,
+    )
     .on(
       "postgres_changes",
       { event: "*", schema: "public", table: "chapter_stages" },

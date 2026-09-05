@@ -28,12 +28,13 @@ const page = (path: string) =>
 describe("staff panel routes", () => {
   it("renders every sidebar destination as a distinct route", () => {
     expect(page("/")).toContain("Minhas tarefas");
-    expect(page("/raw")).toContain("Raw Provider");
-    expect(page("/clean-redraw")).toContain("Clean / Redraw");
+    expect(page("/raw")).toContain("Pegar este capítulo");
+    expect(page("/clean-redraw")).toContain("Capítulos disponíveis");
     expect(page("/translation")).toContain("Tradução");
     expect(page("/typeset")).toContain("Type");
-    expect(page("/review")).toContain("Revisão / QC");
-    expect(page("/ready")).toContain("Prontos pra upar");
+    expect(page("/review")).toContain("<h2>Revisão</h2>");
+    expect(page("/ready")).toContain("Pra upar");
+    expect(page("/published")).toContain("Upados");
     expect(page("/works")).toContain("Nova obra");
     expect(page("/notifications")).toContain("Notificações");
     expect(page("/admin/members")).toContain("Pré-autorizar GitHub");
@@ -58,7 +59,8 @@ describe("staff panel routes", () => {
     expect(home).not.toContain(">Clean<");
     expect(home).not.toContain(">Tradução<");
     expect(home).not.toContain(">Revisão<");
-    expect(home).not.toContain("Prontos pra upar");
+    expect(home).not.toContain("Pra upar");
+    expect(home).not.toContain("Upados");
     expect(
       renderToString(
         <MemoryRouter initialEntries={["/translation"]}>

@@ -34,7 +34,7 @@ Administradores gerenciam convites, cargos e ativação no painel. O banco imped
 ## Configuração Supabase
 
 1. Crie um projeto Supabase.
-2. Aplique em ordem as migrations ainda pendentes de [`supabase/migrations`](supabase/migrations). `20260904220000_works_catalog.sql` já foi aplicada no ambiente remoto; as posteriores dependem dela.
+2. Aplique em ordem somente as migrations pendentes de [`supabase/migrations`](supabase/migrations). Nunca reexecute migrations já aplicadas. O histórico remoto foi reconciliado com as cinco migrations antigas aplicadas manualmente; publicação, integridade/Auth e confiabilidade de e-mail foram aplicadas pela CLI em 05/09/2026.
 3. Em **Authentication → Providers**, habilite GitHub e informe Client ID/secret somente no Supabase.
 4. Configure a callback OAuth indicada pelo Supabase (normalmente `https://<project-ref>.supabase.co/auth/v1/callback`) no GitHub OAuth App.
 5. Em **Authentication → URL Configuration**, adicione `https://awerkori.github.io/project-nox-scan-staff/` e a URL local de desenvolvimento como redirect URLs.
@@ -59,7 +59,7 @@ Os testes em [`src/workflow.test.ts`](src/workflow.test.ts) cobrem a regra centr
 
 `claim_stage` bloqueia a linha com `FOR UPDATE`, exige o cargo da etapa e só aceita estado `AVAILABLE`. O índice parcial `one_active_assignment_per_stage` é uma segunda barreira: dois cliques simultâneos não podem resultar em dois responsáveis ativos. O perdedor recebe a mensagem de conflito da RPC.
 
-Ao ocorrer uma transição real para `AVAILABLE`, `notify_stage_available` cria uma notificação para todos os membros ativos do cargo correspondente (e administradores). RAW libera Clean e Tradução em paralelo; Clean + Tradução liberam Type; Type libera QC. `release_stage` devolve a tarefa para a fila e notifica o cargo outra vez. Renderizações, reloads e eventos Realtime não criam notificações porque não chamam a função de transição.
+Ao ocorrer uma transição real para `AVAILABLE`, o banco avisa os membros ativos do cargo correspondente (e administradores no site). RAW libera Clean e Tradução em paralelo; Clean + Tradução liberam Type; Type libera QC. Devolver uma tarefa à fila não dispara outro e-mail da mesma liberação. Renderizações, reloads e Realtime não criam notificações.
 
 ### E-mails de produção
 
@@ -86,3 +86,13 @@ select vault.create_secret('O-MESMO-EMAIL_WORKER_SECRET', 'email_worker_secret')
 O workflow [`deploy-pages.yml`](.github/workflows/deploy-pages.yml) executa lint, testes e build antes de publicar no GitHub Pages. Defina o Pages do repositório como **GitHub Actions**. As variáveis públicas `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY` devem ser adicionadas como Variables/Secrets de Actions antes do primeiro deploy funcional; elas não são suficientes para burlar RLS.
 
 O app usa `HashRouter`, portanto URLs do Pages não sofrem 404 em rotas internas. URL prevista: `https://awerkori.github.io/project-nox-scan-staff/`.
+
+## Validação da revisão de UX
+
+`npm run test:db` cria um banco **novo e exclusivamente local** em `127.0.0.1:55432`, usando o usuário do sistema com permissão de criar bancos/roles. Não aponta para produção, não apaga bancos existentes e executa todas as migrations, RLS e RPCs. Auth/Storage têm schemas compatíveis; apenas pg_net, cron e Vault são simulados.
+
+`npm run test:browser` usa o React real e esse PostgreSQL com contas separadas por cargo. Percorre upload, conclusão, os três retornos de QC, publicação, rotas negadas e layouts desktop/notebook/mobile. O envelope HTTP do Supabase, a sessão OAuth e o transporte de arquivos são locais; isso **não comprova login externo ou entrega real de e-mail**. Screenshots ficam em `test-results/` (ignoradas pelo Git). Os dois testes são obrigatórios no deploy do Pages.
+
+`tests/remote-smoke.sql` valida as identidades confirmadas de administrador e Typesetter, bloqueios de RPC, proteção do último admin e reentrada no banco remoto. Todas as escritas de teste são revertidas.
+
+`node scripts/email-worker.mjs setup /caminho/privado/worker.env` configura somente o segredo do worker e URL no Vault/Edge Function, sem imprimir valores. O arquivo deve conter `EMAIL_WORKER_SECRET` (64 caracteres hexadecimais) e `STAFF_APP_URL`; proteja-o e remova-o após a configuração. `diagnose` consulta a configuração e os domínios no Resend; uma chave restrita a envio não pode listar domínios. `run` processa a fila. O remetente deve estar configurado como `RESEND_FROM`. Tentativas usam chave de idempotência estável, backoff e limite de repetição; falhas do disparador ficam em `email_worker_diagnostics`.

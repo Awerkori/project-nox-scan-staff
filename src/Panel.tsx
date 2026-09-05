@@ -1,4 +1,11 @@
-import { useEffect, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   Link,
   NavLink,
@@ -14,6 +21,7 @@ import {
   completeStage,
   downloadArtifact,
   markAllNotificationsRead,
+  markChapterPublished,
   markNotificationRead,
   releaseStage,
   reviewChapter,
@@ -21,6 +29,7 @@ import {
   uploadArtifact,
 } from "./lib/production";
 import { supabase } from "./lib/supabase";
+import { fetchChapters } from "./lib/chapters";
 import { SimpleWorkCatalog } from "./WorkCatalog";
 import { stageLabel, stageRole } from "./workflow";
 import type {
@@ -37,10 +46,13 @@ export type PanelProps = {
   chapters: Chapter[];
   notifications: number;
   toast: string;
-  refresh: () => void;
+  error?: string;
+  publicationAvailable?: boolean;
+  refresh: () => void | Promise<void>;
   logout: () => void;
 };
 type Entry = { chapter: Chapter; stage: ChapterStage };
+const NoticeContext = createContext<(message: string) => void>(() => undefined);
 const groups = [
   [
     "HOMEPAGE",
@@ -58,7 +70,8 @@ const groups = [
       ["🌐", "Tradução", "/translation"],
       ["✒️", "Type", "/typeset"],
       ["🔎", "Revisão", "/review"],
-      ["✅", "Prontos pra upar", "/ready"],
+      ["✅", "Pra upar", "/ready"],
+      ["📦", "Upados", "/published"],
     ],
   ],
 ] as const;
@@ -74,6 +87,10 @@ const allowed = (member: StaffMember, role: Role) =>
   role === "ADMIN"
     ? member.is_admin
     : member.is_admin || member.roles.includes(role);
+const stagePath = (stage: Stage) =>
+  stage === "READY"
+    ? "/ready"
+    : `/${Object.keys(routeRole).find((path) => routeRole[path] === stageRole[stage])}`;
 
 export function PanelRoutes(props: PanelProps) {
   return (
@@ -128,6 +145,14 @@ export function PanelRoutes(props: PanelProps) {
             </RoleGate>
           }
         />
+        <Route
+          path="published"
+          element={
+            <RoleGate {...props} role="ADMIN">
+              <Published {...props} />
+            </RoleGate>
+          }
+        />
         <Route path="works" element={<Works {...props} />} />
         <Route
           path="works/:id"
@@ -147,74 +172,99 @@ export function PanelRoutes(props: PanelProps) {
   );
 }
 
-function Shell({ member, notifications, toast, logout }: PanelProps) {
+function Shell({ member, notifications, toast, error, logout }: PanelProps) {
   const navigate = useNavigate();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [notice, setNotice] = useState("");
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(""), 5000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
   return (
-    <div className="app">
-      <aside>
-        <div className="brand">
-          <b>N</b>
-          <h1>
-            Project Nox <small>Scan Staff</small>
-          </h1>
-        </div>
-        <nav>
-          {groups.map(([title, links]) => (
-            <section key={title}>
-              <p>{title}</p>
-              {links
-                .filter(
-                  ([, , to]) =>
-                    title !== "PRODUÇÃO" ||
-                    member.is_admin ||
-                    allowed(member, routeRole[to.slice(1)]),
-                )
-                .map(([icon, label, to]) => (
-                  <NavLink key={to} to={to}>
-                    <span>{icon}</span>
-                    <em>{label}</em>
-                  </NavLink>
-                ))}
-            </section>
-          ))}
-          {member.is_admin && (
-            <section>
-              <p>ADMIN</p>
-              <NavLink to="/admin/members">
-                <span>👥</span>
-                <em>Membros</em>
-              </NavLink>
-              <NavLink to="/admin/settings">
-                <span>⚙️</span>
-                <em>Configurações</em>
-              </NavLink>
-            </section>
-          )}
-        </nav>
-        <div className="profile">
-          <strong>{member.display_name || member.github_login}</strong>
-          <span>@{member.github_login}</span>
-          <button onClick={logout}>Sair</button>
-        </div>
-      </aside>
-      <main>
-        <header>
-          <div>
-            <p className="eyebrow">CENTRAL DE PRODUÇÃO</p>
-            <h2>Project Nox Scan</h2>
+    <NoticeContext.Provider value={setNotice}>
+      <div className="app">
+        <button
+          className="mobile-menu secondary"
+          aria-expanded={menuOpen}
+          aria-controls="staff-navigation"
+          onClick={() => setMenuOpen(!menuOpen)}
+        >
+          {menuOpen ? "Fechar menu ×" : "☰ Menu · Project Nox"}
+        </button>
+        <aside
+          id="staff-navigation"
+          className={`sidebar${menuOpen ? " open" : ""}`}
+        >
+          <div className="brand">
+            <b>N</b>
+            <h1>
+              Project Nox <small>Scan Staff</small>
+            </h1>
           </div>
-          <button
-            className="bell"
-            onClick={() => navigate("/notifications")}
-            aria-label="Abrir notificações"
-          >
-            🔔{notifications ? <b>{notifications}</b> : null}
-          </button>
-        </header>
-        {toast ? <div className="toast">{toast}</div> : null}
-        <Outlet />
-      </main>
-    </div>
+          <nav onClick={() => setMenuOpen(false)}>
+            {groups.map(([title, links]) => (
+              <section key={title}>
+                <p>{title}</p>
+                {links
+                  .filter(
+                    ([, , to]) =>
+                      title !== "PRODUÇÃO" ||
+                      member.is_admin ||
+                      allowed(member, routeRole[to.slice(1)]),
+                  )
+                  .map(([icon, label, to]) => (
+                    <NavLink key={to} to={to}>
+                      <span aria-hidden="true">{icon}</span>
+                      <em>{label}</em>
+                    </NavLink>
+                  ))}
+              </section>
+            ))}
+            {member.is_admin && (
+              <section>
+                <p>ADMIN</p>
+                <NavLink to="/admin/members">
+                  <span>👥</span>
+                  <em>Membros</em>
+                </NavLink>
+                <NavLink to="/admin/settings">
+                  <span>⚙️</span>
+                  <em>Configurações</em>
+                </NavLink>
+              </section>
+            )}
+          </nav>
+          <div className="profile">
+            <strong>{member.display_name || member.github_login}</strong>
+            <span>@{member.github_login}</span>
+            <button onClick={logout}>Sair</button>
+          </div>
+        </aside>
+        <main>
+          <header>
+            <div>
+              <p className="eyebrow">CENTRAL DE PRODUÇÃO</p>
+              <h2>Project Nox Scan</h2>
+            </div>
+            <button
+              className="bell"
+              onClick={() => navigate("/notifications")}
+              aria-label="Abrir notificações"
+            >
+              🔔{notifications ? <b>{notifications}</b> : null}
+            </button>
+          </header>
+          {toast || notice ? (
+            <div className="toast" role="status">
+              {toast || notice}
+            </div>
+          ) : null}
+          {error && <Feedback kind="error">{error}</Feedback>}
+          <Outlet />
+        </main>
+      </div>
+    </NoticeContext.Provider>
   );
 }
 
@@ -248,6 +298,13 @@ function Home(props: PanelProps) {
           stageRole[x.stage.stage as keyof typeof stageRole] as Role,
         )),
   );
+  const ongoing = props.chapters.filter(
+    (chapter) =>
+      !chapter.published_at &&
+      !chapter.chapter_stages.some(
+        (stage) => stage.stage === "READY" && stage.status === "COMPLETED",
+      ),
+  );
   return (
     <section className="page">
       <div className="page-heading">
@@ -258,21 +315,50 @@ function Home(props: PanelProps) {
       <section className="dashboard-grid">
         <Panel title="Minhas tarefas">
           {mine.length ? (
-            mine.map((x) => <Task key={x.stage.id} {...x} {...props} />)
+            mine.map(({ chapter, stage }) => (
+              <Link
+                className="home-task"
+                key={stage.id}
+                to={stagePath(stage.stage)}
+              >
+                <div>
+                  <strong>
+                    {chapter.work?.title} #{chapter.number}
+                  </strong>
+                  <small>{stageLabel[stage.stage]}</small>
+                </div>
+                <span>Continuar →</span>
+              </Link>
+            ))
           ) : (
             <Empty text="Você está em dia. Nenhuma tarefa atribuída." />
           )}
         </Panel>
         <Panel title="Filas de produção">
-          {available.length ? (
-            available.map((x) => <Task key={x.stage.id} {...x} {...props} />)
-          ) : (
-            <Empty text="Não há tarefas disponíveis para seus cargos." />
-          )}
+          {Object.entries(routeRole)
+            .filter(([, role]) => allowed(props.member, role))
+            .map(([path]) => {
+              const stage = (
+                Object.keys(stageRole) as Exclude<Stage, "READY">[]
+              ).find((stage) => stageRole[stage] === routeRole[path])!;
+              const count = available.filter(
+                (item) => item.stage.stage === stage,
+              ).length;
+              return (
+                <Link className="home-task" key={path} to={`/${path}`}>
+                  <strong>{stageLabel[stage]}</strong>
+                  <span>
+                    {stage === "RAW"
+                      ? "Escolher capítulo →"
+                      : `${count} ${count === 1 ? "disponível" : "disponíveis"} →`}
+                  </span>
+                </Link>
+              );
+            })}
         </Panel>
         <Panel title="Capítulos em andamento">
-          {props.chapters.length ? (
-            props.chapters.map((chapter) => (
+          {ongoing.length ? (
+            ongoing.slice(0, 8).map((chapter) => (
               <Link
                 className="chapter"
                 key={chapter.id}
@@ -285,7 +371,7 @@ function Home(props: PanelProps) {
               </Link>
             ))
           ) : (
-            <Empty text="Nenhum capítulo entrou em produção." />
+            <Empty text="Nenhum capítulo em produção agora." />
           )}
         </Panel>
       </section>
@@ -293,13 +379,13 @@ function Home(props: PanelProps) {
   );
 }
 function RawQueue(props: PanelProps) {
-  const navigate = useNavigate();
   const [works, setWorks] = useState<{ id: string; title: string }[]>([]);
   const [workId, setWorkId] = useState("");
   const [catalog, setCatalog] = useState<{ id: string; number: number }[]>([]);
   const [catalogId, setCatalogId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
   useEffect(() => {
     void supabase
       ?.from("works")
@@ -312,6 +398,9 @@ function RawQueue(props: PanelProps) {
       });
   }, []);
   useEffect(() => {
+    let active = true;
+    setCatalogId("");
+    setCatalog([]);
     if (!workId) return;
     void supabase
       ?.from("work_chapter_catalog")
@@ -321,19 +410,25 @@ function RawQueue(props: PanelProps) {
       .order("number")
       .limit(500)
       .then(({ data, error }) => {
+        if (!active) return;
         setCatalog(data ?? []);
         setCatalogId(data?.[0]?.id ?? "");
         setError(error?.message ?? "");
       });
-  }, [workId]);
+    return () => {
+      active = false;
+    };
+  }, [workId, props.chapters]);
   const start = async () => {
     if (!catalogId || busy) return;
     setBusy(true);
     setError("");
+    setSuccess("");
     try {
-      const chapter = await startCatalogProduction(catalogId);
-      props.refresh();
-      navigate(`/chapters/${chapter.id}`);
+      await startCatalogProduction(catalogId);
+      await props.refresh();
+      setCatalog((current) => current.filter((item) => item.id !== catalogId));
+      setSuccess("RAW adicionado aos seus capítulos.");
     } catch (cause) {
       setError(messageOf(cause));
     } finally {
@@ -341,22 +436,37 @@ function RawQueue(props: PanelProps) {
     }
   };
   const active = entries(props.chapters).filter(
-    (x) => x.stage.stage === "RAW" && x.stage.status === "IN_PROGRESS",
+    (x) =>
+      x.stage.stage === "RAW" &&
+      x.stage.status === "IN_PROGRESS" &&
+      x.stage.assigned_to === props.member.user_id,
+  );
+  const {
+    artifacts,
+    credits,
+    loading,
+    error: filesError,
+    reload,
+  } = useCurrentArtifacts(
+    active.map((item) => item.chapter.id),
+    props.chapters,
   );
   return (
-    <section className="page">
-      <div className="page-heading">
-        <p className="eyebrow">Raw Provider · iniciar produção</p>
+    <section className="page production-page">
+      <div className="page-heading channel-heading">
+        <p className="eyebrow">PRODUÇÃO</p>
         <h2>Raw</h2>
-        <p>
-          Escolha um capítulo disponível no catálogo. Seu usuário será
-          registrado automaticamente.
-        </p>
+        <p>Escolha um capítulo, envie o RAW e conclua. Só isso.</p>
       </div>
-      <Panel title="Pegar novo RAW">
-        <div className="form-row">
+      <section className="queue-section available-section">
+        <QueueHeading
+          title="Capítulos disponíveis"
+          count={catalog.length}
+          help="Escolha a obra e o capítulo que você vai iniciar."
+        />
+        <div className="raw-picker">
           <label>
-            Obra
+            <span>Obra</span>
             <select value={workId} onChange={(e) => setWorkId(e.target.value)}>
               {works.map((work) => (
                 <option value={work.id} key={work.id}>
@@ -366,7 +476,7 @@ function RawQueue(props: PanelProps) {
             </select>
           </label>
           <label>
-            Capítulo
+            <span>Capítulo</span>
             <select
               value={catalogId}
               onChange={(e) => setCatalogId(e.target.value)}
@@ -379,27 +489,60 @@ function RawQueue(props: PanelProps) {
                   </option>
                 ))
               ) : (
-                <option>Nenhum disponível</option>
+                <option>Nenhum capítulo disponível</option>
               )}
             </select>
           </label>
           <button
-            className="primary"
+            className="primary queue-claim"
             disabled={!catalogId || busy}
             onClick={() => void start()}
           >
-            {busy ? "Assumindo…" : "Pegar RAW"}
+            {busy ? "Pegando capítulo…" : "Pegar este capítulo"}
           </button>
         </div>
-        {error && <small className="error">{error}</small>}
-      </Panel>
-      <Panel title="Em andamento">
+        {error && <Feedback kind="error">{error}</Feedback>}
+        {success && <Feedback kind="success">{success}</Feedback>}
+        {entries(props.chapters)
+          .filter(
+            (item) =>
+              item.stage.stage === "RAW" &&
+              item.stage.status === "AVAILABLE" &&
+              !item.chapter.published_at,
+          )
+          .map((entry) => (
+            <AvailableStageCard
+              key={entry.stage.id}
+              entry={entry}
+              refresh={props.refresh}
+            />
+          ))}
+      </section>
+      <section className="queue-section mine-section">
+        {filesError && <Feedback kind="error">{filesError}</Feedback>}
+        <QueueHeading
+          title="Meus capítulos"
+          count={active.length}
+          help="Continue exatamente de onde parou."
+        />
         {active.length ? (
-          active.map((x) => <Task key={x.stage.id} {...x} {...props} />)
+          <div className="work-list">
+            {active.map((entry) => (
+              <StageWorkCard
+                key={entry.stage.id}
+                entry={entry}
+                artifacts={artifacts}
+                credits={credits}
+                filesLoading={loading}
+                refresh={props.refresh}
+                reloadFiles={reload}
+              />
+            ))}
+          </div>
         ) : (
-          <Empty text="Nenhum RAW em andamento." />
+          <Empty text="Você ainda não pegou nenhum RAW." />
         )}
-      </Panel>
+      </section>
     </section>
   );
 }
@@ -407,134 +550,118 @@ function Queue({ stage: queueStage, ...props }: PanelProps & { stage: Stage }) {
   const list = entries(props.chapters).filter(
     (x) =>
       x.stage.stage === queueStage &&
-      (queueStage === "READY"
-        ? x.stage.status === "COMPLETED"
-        : x.stage.status !== "WAITING"),
+      !x.chapter.published_at &&
+      ["AVAILABLE", "IN_PROGRESS"].includes(x.stage.status),
   );
+  const available = list.filter((entry) => entry.stage.status === "AVAILABLE");
+  const mine = list.filter(
+    (entry) =>
+      entry.stage.status === "IN_PROGRESS" &&
+      entry.stage.assigned_to === props.member.user_id,
+  );
+  const {
+    artifacts,
+    credits,
+    loading,
+    error: filesError,
+    reload,
+  } = useCurrentArtifacts(
+    mine.map((item) => item.chapter.id),
+    props.chapters,
+  );
+  const copy = channelCopy[queueStage as Exclude<Stage, "RAW" | "READY">];
   return (
-    <section className="page">
-      <h2>
-        {queueStage === "READY" ? "Prontos pra upar" : stageLabel[queueStage]}
-      </h2>
-      <Panel title="Disponíveis e em andamento">
-        {list.length ? (
-          list.map(({ chapter, stage }) => (
-            <Task
-              key={stage.id}
-              chapter={chapter}
-              stage={stage}
-              member={props.member}
-              refresh={props.refresh}
-            />
-          ))
-        ) : (
-          <Empty text="Nenhum capítulo nesta fila." />
-        )}
-      </Panel>
-    </section>
-  );
-}
-function Ready({ chapters }: PanelProps) {
-  const ready = chapters.filter((chapter) =>
-    chapter.chapter_stages.some(
-      (stage) => stage.stage === "READY" && stage.status === "COMPLETED",
-    ),
-  );
-  const [files, setFiles] = useState<Artifact[]>([]);
-  const ids = ready.map((chapter) => chapter.id);
-  useEffect(() => {
-    if (!ids.length) {
-      setFiles([]);
-      return;
-    }
-    void supabase
-      ?.from("artifacts")
-      .select(
-        "id,chapter_id,stage,provider,provider_key,original_name,mime_type,byte_size,version,note,is_current,upload_status,created_at",
-      )
-      .in("chapter_id", ids)
-      .eq("stage", "TYPESET")
-      .eq("is_current", true)
-      .eq("upload_status", "AVAILABLE")
-      .then(({ data }) => setFiles((data ?? []) as Artifact[]));
-  }, [chapters]);
-  return (
-    <section className="page">
-      <div className="page-heading">
-        <p className="eyebrow">PUBLICAÇÃO</p>
-        <h2>Prontos pra upar</h2>
-        <p>Capítulos aprovados pelo QC e seus arquivos finais.</p>
+    <section className="page production-page">
+      <div className="page-heading channel-heading">
+        <p className="eyebrow">PRODUÇÃO</p>
+        <h2>{copy.title}</h2>
+        <p>{copy.description}</p>
       </div>
-      <Panel title="Aprovados">
-        {ready.length ? (
-          ready.map((chapter) => {
-            const file = files.find((item) => item.chapter_id === chapter.id);
-            const approved = chapter.chapter_stages.find(
-              (stage) => stage.stage === "READY",
-            )?.completed_at;
-            return (
-              <article className="artifact" key={chapter.id}>
-                <div>
-                  <strong>
-                    {chapter.work?.title} #{chapter.number}
-                  </strong>
-                  <small>
-                    {file
-                      ? `Type v${file.version}`
-                      : "Arquivo final carregando"}
-                    {approved ? ` · ${formatDate(approved)}` : ""}
-                  </small>
-                </div>
-                <div className="task-actions">
-                  {file && (
-                    <button
-                      className="secondary"
-                      onClick={() =>
-                        void downloadArtifact(file.provider, file.provider_key)
-                      }
-                    >
-                      Baixar
-                    </button>
-                  )}
-                  <Link className="primary" to={`/chapters/${chapter.id}`}>
-                    Créditos e histórico
-                  </Link>
-                </div>
-              </article>
-            );
-          })
+      <section className="queue-section available-section">
+        <QueueHeading
+          title="Capítulos disponíveis"
+          count={available.length}
+          help="Escolha um capítulo para começar."
+        />
+        {available.length ? (
+          <div className="available-list">
+            {available.map((entry) => (
+              <AvailableStageCard
+                key={entry.stage.id}
+                entry={entry}
+                refresh={props.refresh}
+              />
+            ))}
+          </div>
         ) : (
-          <Empty text="Nenhum capítulo aguardando publicação." />
+          <Empty text="Nada disponível agora. Quando uma etapa for liberada, ela aparecerá aqui." />
         )}
-      </Panel>
+      </section>
+      <section className="queue-section mine-section">
+        {filesError && <Feedback kind="error">{filesError}</Feedback>}
+        <QueueHeading
+          title="Meus capítulos"
+          count={mine.length}
+          help="Arquivos e ações dos capítulos que estão com você."
+        />
+        {mine.length ? (
+          <div className="work-list">
+            {mine.map((entry) => (
+              <StageWorkCard
+                key={entry.stage.id}
+                entry={entry}
+                artifacts={artifacts}
+                credits={credits}
+                filesLoading={loading}
+                refresh={props.refresh}
+                reloadFiles={reload}
+              />
+            ))}
+          </div>
+        ) : (
+          <Empty text="Nenhum capítulo com você nesta etapa." />
+        )}
+      </section>
     </section>
   );
 }
-function Task({
-  chapter,
-  stage,
-  member,
+function QueueHeading({
+  title,
+  count,
+  help,
+}: {
+  title: string;
+  count: number;
+  help: string;
+}) {
+  return (
+    <div className="queue-heading">
+      <div>
+        <h3>{title}</h3>
+        <p>{help}</p>
+      </div>
+      <b>{count}</b>
+    </div>
+  );
+}
+function AvailableStageCard({
+  entry,
   refresh,
-}: Entry & Pick<PanelProps, "member" | "refresh">) {
-  const [error, setError] = useState("");
+}: {
+  entry: Entry;
+  refresh: PanelProps["refresh"];
+}) {
+  const notify = useContext(NoticeContext);
   const [busy, setBusy] = useState(false);
-  const role =
-    stage.stage === "READY"
-      ? "ADMIN"
-      : stageRole[stage.stage as keyof typeof stageRole];
-  const claim =
-    stage.status === "AVAILABLE" &&
-    (member.is_admin || member.roles.includes(role as Role));
-  const release =
-    stage.status === "IN_PROGRESS" &&
-    (member.is_admin || stage.assigned_to === member.user_id);
-  const run = async (kind: "claim" | "release") => {
+  const [error, setError] = useState("");
+  const claim = async () => {
     if (busy) return;
     setBusy(true);
+    setError("");
     try {
-      if (kind === "claim") await claimStage(stage.id);
-      else await releaseStage(stage.id);
-      refresh();
+      await claimStage(entry.stage.id);
+      notify("Capítulo adicionado em Meus capítulos.");
+      await refresh();
     } catch (cause) {
       setError(messageOf(cause));
     } finally {
@@ -542,48 +669,581 @@ function Task({
     }
   };
   return (
-    <article className="task">
+    <article className="available-card">
       <div>
-        <Link to={`/chapters/${chapter.id}`}>
-          <strong>
-            {chapter.work?.title} #{chapter.number}
-          </strong>
-        </Link>
-        <span>
-          {stageLabel[stage.stage]} · {statusLabel(stage.status)}
-        </span>
-        {stage.assignee && (
-          <span>
-            Responsável:{" "}
-            {stage.assignee.display_name || stage.assignee.github_login}
-          </span>
+        <strong>
+          {entry.chapter.work?.title} #{entry.chapter.number}
+        </strong>
+        <span>Pronto para começar</span>
+      </div>
+      <button
+        className="primary queue-claim"
+        disabled={busy}
+        onClick={() => void claim()}
+      >
+        {busy ? "Assumindo…" : "Pegar capítulo"}
+      </button>
+      {error && <Feedback kind="error">{error}</Feedback>}
+    </article>
+  );
+}
+function useCurrentArtifacts(chapterIds: string[], revision?: unknown) {
+  const [artifacts, setArtifacts] = useState<Artifact[]>([]);
+  const [credits, setCredits] = useState<CreditItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const idsKey = [...new Set(chapterIds)].sort().join(",");
+  const load = useCallback(async () => {
+    const ids = idsKey ? idsKey.split(",") : [];
+    if (!supabase || !ids.length) {
+      setArtifacts([]);
+      return;
+    }
+    setLoading(true);
+    const [files, contributions] = await Promise.all([
+      supabase
+        .from("artifacts")
+        .select(
+          "id,chapter_id,stage,provider,provider_key,original_name,mime_type,byte_size,version,note,is_current,upload_status,created_at",
+        )
+        .in("chapter_id", ids)
+        .eq("upload_status", "AVAILABLE")
+        .eq("is_current", true),
+      supabase
+        .from("stage_completions")
+        .select(
+          "id,chapter_id,stage,completed_at,user:profiles!stage_completions_user_id_fkey(display_name,github_login)",
+        )
+        .in("chapter_id", ids)
+        .order("completed_at"),
+    ]);
+    setArtifacts((files.data ?? []) as Artifact[]);
+    setCredits((contributions.data ?? []) as unknown as CreditItem[]);
+    setError(
+      files.error || contributions.error
+        ? "Não foi possível carregar arquivos ou créditos. Tente atualizar."
+        : "",
+    );
+    setLoading(false);
+  }, [idsKey]);
+  useEffect(() => {
+    void load();
+  }, [load, revision]);
+  return { artifacts, credits, loading, error, reload: load };
+}
+const dependencyStages: Record<Exclude<Stage, "READY">, Stage[]> = {
+  RAW: [],
+  CLEAN_REDRAW: ["RAW"],
+  TRANSLATION: ["RAW"],
+  TYPESET: ["CLEAN_REDRAW", "TRANSLATION"],
+  REVIEW: ["TYPESET"],
+};
+function StageWorkCard({
+  entry,
+  artifacts,
+  credits = [],
+  filesLoading,
+  refresh,
+  reloadFiles,
+  showDetails = true,
+}: {
+  entry: Entry;
+  artifacts: Artifact[];
+  credits?: CreditItem[];
+  filesLoading: boolean;
+  refresh: PanelProps["refresh"];
+  reloadFiles: () => Promise<void>;
+  showDetails?: boolean;
+}) {
+  const notify = useContext(NoticeContext);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState("");
+  const [message, setMessage] = useState<{
+    kind: "error" | "success";
+    text: string;
+  }>();
+  const stage = entry.stage.stage as Exclude<Stage, "READY">;
+  const current = artifacts.find(
+    (item) => item.chapter_id === entry.chapter.id && item.stage === stage,
+  );
+  const dependencies = dependencyStages[stage].flatMap((dependency) => {
+    const artifact = artifacts.find(
+      (item) =>
+        item.chapter_id === entry.chapter.id && item.stage === dependency,
+    );
+    return artifact ? [artifact] : [];
+  });
+  const run = async (
+    key: string,
+    action: () => Promise<unknown>,
+    success: string,
+  ) => {
+    if (busy) return;
+    setBusy(key);
+    setMessage(undefined);
+    try {
+      await action();
+      setMessage({ kind: "success", text: success });
+    } catch (cause) {
+      setMessage({ kind: "error", text: messageOf(cause) });
+    } finally {
+      setBusy("");
+    }
+  };
+  const upload = (file?: File) =>
+    file &&
+    run(
+      "upload",
+      async () => {
+        await uploadArtifact({ chapterId: entry.chapter.id, stage, file });
+        if (fileInput.current) fileInput.current.value = "";
+        await reloadFiles();
+      },
+      "Arquivo enviado. Agora você já pode concluir a etapa.",
+    );
+  const complete = () =>
+    run(
+      "complete",
+      async () => {
+        await completeStage(entry.stage.id);
+        notify(`${stageLabel[stage]} concluído. Obrigado pelo trabalho!`);
+        await refresh();
+      },
+      "Etapa concluída.",
+    );
+  return (
+    <article className="work-card-action">
+      <header>
+        <div>
+          <span className="your-task">{stageLabel[stage]} · COM VOCÊ</span>
+          <h3>
+            {entry.chapter.work?.title} #{entry.chapter.number}
+          </h3>
+        </div>
+        {showDetails && (
+          <Link to={`/chapters/${entry.chapter.id}`}>Ver detalhes</Link>
+        )}
+      </header>
+      {entry.stage.rejection_reason && (
+        <Feedback kind="error">
+          Correção solicitada: {entry.stage.rejection_reason}
+        </Feedback>
+      )}
+      <div className="action-flow">
+        {filesLoading && <p role="status">Carregando material…</p>}
+        {!filesLoading &&
+          dependencies.length < dependencyStages[stage].length && (
+            <Feedback kind="error">
+              O material ainda não carregou. Atualize antes de começar.
+            </Feedback>
+          )}
+        {dependencies.map((dependency, index) => (
+          <button
+            className="action-button download-action"
+            disabled={!!busy}
+            key={dependency.id}
+            onClick={() =>
+              void run(
+                `download-${dependency.id}`,
+                () =>
+                  downloadArtifact(
+                    dependency.provider,
+                    dependency.provider_key,
+                  ),
+                "Download iniciado.",
+              )
+            }
+          >
+            <span>{index + 1}</span>
+            <div>
+              <strong>Baixar {stageLabel[dependency.stage]}</strong>
+              <small>Versão {dependency.version}</small>
+            </div>
+          </button>
+        ))}
+        {stage !== "REVIEW" ? (
+          <>
+            <div className="upload-action action-button">
+              <span>{dependencies.length + 1}</span>
+              <div>
+                <strong>
+                  {current ? "Enviar nova versão" : "Enviar arquivo"}
+                </strong>
+                <small>
+                  {current
+                    ? `Versão atual: v${current.version}`
+                    : "Escolha o arquivo pronto para enviar"}
+                </small>
+              </div>
+              <input
+                ref={fileInput}
+                aria-label={`Arquivo ${stageLabel[stage]}`}
+                hidden
+                type="file"
+                disabled={!!busy}
+                onChange={(event) => void upload(event.target.files?.[0])}
+              />
+              <button
+                className="primary upload-button"
+                disabled={!!busy}
+                onClick={() => fileInput.current?.click()}
+              >
+                {busy === "upload" ? "Enviando…" : "Fazer upload"}
+              </button>
+            </div>
+            <button
+              className="action-button complete-action"
+              disabled={!current || !!busy || filesLoading}
+              onClick={() => void complete()}
+            >
+              <span>{dependencies.length + 2}</span>
+              <div>
+                <strong>
+                  {busy === "complete"
+                    ? "Concluindo…"
+                    : `Concluir ${stage === "RAW" ? "RAW" : stageLabel[stage]}`}
+                </strong>
+                <small>
+                  {current
+                    ? `Usar versão ${current.version}`
+                    : "Envie um arquivo primeiro"}
+                </small>
+              </div>
+            </button>
+          </>
+        ) : (
+          <Link
+            className="action-button complete-action review-action"
+            to={`/chapters/${entry.chapter.id}`}
+          >
+            <span>{dependencies.length + 1}</span>
+            <div>
+              <strong>Revisar e decidir</strong>
+              <small>Aprovar ou solicitar correção</small>
+            </div>
+          </Link>
         )}
       </div>
-      <div className="task-actions">
-        {claim && (
-          <button
-            className="primary"
-            disabled={busy}
-            onClick={() => void run("claim")}
-          >
-            {busy ? "Assumindo…" : "Assumir tarefa"}
-          </button>
+      {current && (
+        <button
+          className="uploaded-file secondary"
+          disabled={!!busy}
+          onClick={() =>
+            void run(
+              "download-current",
+              () => downloadArtifact(current.provider, current.provider_key),
+              "Download iniciado.",
+            )
+          }
+        >
+          ✓ Arquivo enviado · v{current.version} · Baixar
+        </button>
+      )}
+      {["TYPESET", "REVIEW"].includes(stage) && (
+        <Credits
+          credits={credits.filter(
+            (credit) => credit.chapter_id === entry.chapter.id,
+          )}
+        />
+      )}
+      {message && <Feedback kind={message.kind}>{message.text}</Feedback>}
+      <button
+        className="release-link"
+        disabled={!!busy}
+        onClick={() =>
+          void run(
+            "release",
+            async () => {
+              await releaseStage(entry.stage.id);
+              notify("Capítulo devolvido à fila.");
+              await refresh();
+            },
+            "Capítulo devolvido à fila.",
+          )
+        }
+      >
+        Não vou continuar — devolver à fila
+      </button>
+    </article>
+  );
+}
+function Credits({ credits }: { credits: CreditItem[] }) {
+  const unique = credits.filter(
+    (credit, index) =>
+      credits.findIndex(
+        (other) =>
+          other.stage === credit.stage &&
+          other.user?.github_login === credit.user?.github_login,
+      ) === index,
+  );
+  return (
+    <div className="inline-credits">
+      <strong>Créditos</strong>
+      {unique.length ? (
+        unique.map((credit) => (
+          <span key={credit.id}>
+            {stageLabel[credit.stage]}:{" "}
+            <b>{credit.user?.display_name || credit.user?.github_login}</b>
+          </span>
+        ))
+      ) : (
+        <span>As contribuições aparecem aqui após cada conclusão.</span>
+      )}
+    </div>
+  );
+}
+function Feedback({
+  kind,
+  children,
+}: {
+  kind: "error" | "success";
+  children: React.ReactNode;
+}) {
+  return (
+    <p
+      role={kind === "error" ? "alert" : "status"}
+      className={`feedback ${kind}`}
+    >
+      {children}
+    </p>
+  );
+}
+const channelCopy: Record<
+  Exclude<Stage, "RAW" | "READY">,
+  { title: string; description: string }
+> = {
+  CLEAN_REDRAW: {
+    title: "Clean",
+    description: "Baixe o RAW, faça o Clean e envie o arquivo final.",
+  },
+  TRANSLATION: {
+    title: "Tradução",
+    description: "Baixe o RAW, traduza o capítulo e envie o arquivo.",
+  },
+  TYPESET: {
+    title: "Type",
+    description: "Baixe Clean e Tradução, monte o capítulo e envie o Type.",
+  },
+  REVIEW: {
+    title: "Revisão",
+    description: "Baixe o Type, confira o capítulo e aprove ou peça correção.",
+  },
+};
+function Ready({ chapters, refresh, publicationAvailable = true }: PanelProps) {
+  const notify = useContext(NoticeContext);
+  const ready = chapters.filter(
+    (chapter) =>
+      !chapter.published_at &&
+      chapter.chapter_stages.some(
+        (stage) => stage.stage === "READY" && stage.status === "COMPLETED",
+      ),
+  );
+  const { artifacts: files, loading } = useCurrentArtifacts(
+    ready.map((chapter) => chapter.id),
+  );
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const publish = async (chapter: Chapter) => {
+    if (busy) return;
+    if (
+      !window.confirm(
+        `${chapter.work?.title} #${chapter.number} já foi publicado? Ele será movido para Upados.`,
+      )
+    )
+      return;
+    setBusy(chapter.id);
+    setError("");
+    try {
+      await markChapterPublished(chapter.id);
+      notify("Publicação confirmada. O capítulo está em Upados.");
+      await refresh();
+    } catch (cause) {
+      setError(messageOf(cause));
+    } finally {
+      setBusy("");
+    }
+  };
+  return (
+    <section className="page production-page">
+      <div className="page-heading channel-heading">
+        <p className="eyebrow">PUBLICAÇÃO</p>
+        <h2>Pra upar</h2>
+        <p>Baixe o arquivo aprovado e marque quando a publicação terminar.</p>
+      </div>
+      {error && <Feedback kind="error">{error}</Feedback>}
+      {!publicationAvailable && (
+        <Feedback kind="error">
+          Os downloads continuam disponíveis. O registro em Upados aguarda a
+          atualização da central.
+        </Feedback>
+      )}
+      <section className="queue-section">
+        <QueueHeading
+          title="Aguardando publicação"
+          count={ready.length}
+          help="Somente capítulos aprovados aparecem aqui."
+        />
+        {ready.length ? (
+          <div className="publication-list">
+            {ready.map((chapter) => {
+              const file = files.find(
+                (item) =>
+                  item.chapter_id === chapter.id && item.stage === "TYPESET",
+              );
+              const approved = chapter.chapter_stages.find(
+                (stage) => stage.stage === "READY",
+              )?.completed_at;
+              return (
+                <article className="publication-card" key={chapter.id}>
+                  <div className="publication-number">#{chapter.number}</div>
+                  <div>
+                    <strong>{chapter.work?.title}</strong>
+                    <small>
+                      {file ? `Type v${file.version}` : "Carregando arquivo"}
+                      {approved ? ` · aprovado em ${formatDate(approved)}` : ""}
+                    </small>
+                  </div>
+                  <div className="publication-actions">
+                    <button
+                      className="primary big-action"
+                      disabled={!file || !!busy || loading}
+                      onClick={() =>
+                        file &&
+                        void downloadArtifact(
+                          file.provider,
+                          file.provider_key,
+                        ).catch((cause) => setError(messageOf(cause)))
+                      }
+                    >
+                      Baixar arquivo final
+                    </button>
+                    <button
+                      className="publish-action big-action"
+                      disabled={!file || !!busy || !publicationAvailable}
+                      onClick={() => void publish(chapter)}
+                    >
+                      {busy === chapter.id ? "Salvando…" : "Marcar como upado"}
+                    </button>
+                    <Link to={`/chapters/${chapter.id}`}>Ver créditos</Link>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        ) : (
+          <Empty text="Tudo publicado. Nenhum capítulo aguardando upload." />
         )}
-        {release && (
+      </section>
+    </section>
+  );
+}
+function Published({ chapters, publicationAvailable = true }: PanelProps) {
+  const [published, setPublished] = useState<Chapter[]>([]);
+  const [page, setPage] = useState(0);
+  const [more, setMore] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let active = true;
+    void fetchChapters({ published: true, page }).then(({ data, error }) => {
+      if (!active) return;
+      setError(error ? messageOf(error) : "");
+      setPublished((data || []) as unknown as Chapter[]);
+      setMore(data?.length === 30);
+    });
+    return () => {
+      active = false;
+    };
+  }, [page, chapters]);
+  const { artifacts: files, loading } = useCurrentArtifacts(
+    published.map((chapter) => chapter.id),
+  );
+  return (
+    <section className="page production-page">
+      <div className="page-heading channel-heading">
+        <p className="eyebrow">ARQUIVO</p>
+        <h2>Upados</h2>
+        <p>Histórico dos capítulos que já foram publicados.</p>
+      </div>
+      <section className="queue-section">
+        {error && <Feedback kind="error">{error}</Feedback>}
+        <QueueHeading
+          title="Capítulos publicados"
+          count={published.length}
+          help="Os capítulos finalizados ficam guardados somente aqui."
+        />
+        {published.length ? (
+          <div className="publication-list">
+            {published.map((chapter) => {
+              const file = files.find(
+                (item) =>
+                  item.chapter_id === chapter.id && item.stage === "TYPESET",
+              );
+              return (
+                <article
+                  className="publication-card published"
+                  key={chapter.id}
+                >
+                  <div className="publication-number">#{chapter.number}</div>
+                  <div>
+                    <strong>{chapter.work?.title}</strong>
+                    <small>
+                      Publicado em {formatDate(chapter.published_at!)}
+                      {file ? ` · Type v${file.version}` : ""}
+                    </small>
+                  </div>
+                  <div className="publication-actions">
+                    <button
+                      className="secondary big-action"
+                      disabled={!file || loading}
+                      onClick={() =>
+                        file &&
+                        void downloadArtifact(
+                          file.provider,
+                          file.provider_key,
+                        ).catch((cause) => setError(messageOf(cause)))
+                      }
+                    >
+                      Baixar arquivo
+                    </button>
+                    <Link
+                      className="secondary big-action"
+                      to={`/chapters/${chapter.id}`}
+                    >
+                      Ver capítulo
+                    </Link>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        ) : (
+          <Empty
+            text={
+              publicationAvailable
+                ? "Nenhum capítulo foi marcado como upado ainda."
+                : "O histórico de publicação aguarda a atualização da central."
+            }
+          />
+        )}
+        <div className="pagination">
           <button
             className="secondary"
-            disabled={busy}
-            onClick={() => void run("release")}
+            disabled={!page}
+            onClick={() => setPage(page - 1)}
           >
-            {busy ? "Liberando…" : "Liberar tarefa"}
+            Anterior
           </button>
-        )}
-        <Link className="secondary" to={`/chapters/${chapter.id}`}>
-          Abrir
-        </Link>
-      </div>
-      {error && <small className="error">{error}</small>}
-    </article>
+          <span>Página {page + 1}</span>
+          <button
+            className="secondary"
+            disabled={!more}
+            onClick={() => setPage(page + 1)}
+          >
+            Próxima
+          </button>
+        </div>
+      </section>
+    </section>
   );
 }
 
@@ -597,6 +1257,7 @@ type WorkRow = {
   catalog: { status: string }[];
 };
 function Works({ member }: PanelProps) {
+  const [busy, setBusy] = useState(false);
   const [works, setWorks] = useState<WorkRow[]>([]);
   const [title, setTitle] = useState("");
   const [synopsis, setSynopsis] = useState("");
@@ -615,7 +1276,8 @@ function Works({ member }: PanelProps) {
       });
   useEffect(load, []);
   const create = async () => {
-    if (!supabase || !title.trim()) return;
+    if (!supabase || !title.trim() || busy) return;
+    setBusy(true);
     const { error } = await supabase.from("works").insert({
       title: title.trim(),
       synopsis,
@@ -624,7 +1286,8 @@ function Works({ member }: PanelProps) {
         .map((value) => value.trim())
         .filter(Boolean),
     });
-    if (error) setError(error.message);
+    setBusy(false);
+    if (error) setError(messageOf(error));
     else {
       setTitle("");
       setSynopsis("");
@@ -637,7 +1300,7 @@ function Works({ member }: PanelProps) {
       <div className="page-heading">
         <p className="eyebrow">BIBLIOTECA</p>
         <h2>Obras</h2>
-        <p>Catálogo editorial separado dos workflows de produção.</p>
+        <p>Encontre uma obra e veja quais capítulos faltam.</p>
       </div>
       {member.is_admin && (
         <details className="create-box">
@@ -645,11 +1308,13 @@ function Works({ member }: PanelProps) {
           <div>
             <input
               value={title}
+              aria-label="Título da nova obra"
               onChange={(e) => setTitle(e.target.value)}
               placeholder="Título"
             />
             <textarea
               value={synopsis}
+              aria-label="Sinopse da nova obra"
               onChange={(e) => setSynopsis(e.target.value)}
               placeholder="Sinopse"
             />
@@ -658,8 +1323,12 @@ function Works({ member }: PanelProps) {
               onChange={(e) => setAliases(e.target.value)}
               placeholder="Outros nomes, separados por vírgula"
             />
-            <button className="primary" onClick={() => void create()}>
-              Criar obra
+            <button
+              className="primary"
+              disabled={busy || !title.trim()}
+              onClick={() => void create()}
+            >
+              {busy ? "Criando…" : "Criar obra"}
             </button>
           </div>
         </details>
@@ -722,6 +1391,7 @@ type CommentItem = {
 };
 type CreditItem = {
   id: string;
+  chapter_id?: string;
   stage: Stage;
   completed_at: string;
   user: { display_name: string | null; github_login: string } | null;
@@ -735,14 +1405,15 @@ type ActivityItem = {
   actor: { display_name: string | null; github_login: string } | null;
 };
 function Chapter({ member, refresh, chapters }: PanelProps) {
+  const notify = useContext(NoticeContext);
   const { id } = useParams();
   const [chapter, setChapter] = useState<Chapter | null>(null);
+  const [loading, setLoading] = useState(true);
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [comments, setComments] = useState<CommentItem[]>([]);
   const [credits, setCredits] = useState<CreditItem[]>([]);
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [body, setBody] = useState("");
-  const [files, setFiles] = useState<Record<string, File | undefined>>({});
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [reason, setReason] = useState("");
@@ -750,13 +1421,7 @@ function Chapter({ member, refresh, chapters }: PanelProps) {
   const load = async () => {
     if (!id || !supabase) return;
     const [c, a, co, cr, ac] = await Promise.all([
-      supabase
-        .from("chapters")
-        .select(
-          "id,number,title,work:works(id,title),chapter_stages(id,chapter_id,stage,status,assigned_to,assigned_at,completed_at,rejection_reason,assignee:profiles!chapter_stages_assigned_to_fkey(display_name,github_login,avatar_url))",
-        )
-        .eq("id", id)
-        .maybeSingle(),
+      fetchChapters({ id }),
       supabase
         .from("artifacts")
         .select(
@@ -790,7 +1455,8 @@ function Chapter({ member, refresh, chapters }: PanelProps) {
     ]);
     const failed = c.error || a.error || co.error || cr.error || ac.error;
     setError(failed ? failed.message : "");
-    setChapter(c.data as unknown as Chapter);
+    setChapter((c.data?.[0] as unknown as Chapter) || null);
+    setLoading(false);
     setArtifacts((a.data ?? []) as unknown as Artifact[]);
     setComments((co.data ?? []) as unknown as CommentItem[]);
     setCredits((cr.data ?? []) as unknown as CreditItem[]);
@@ -805,6 +1471,11 @@ function Chapter({ member, refresh, chapters }: PanelProps) {
     setError("");
     try {
       await action();
+      if (key === "approve")
+        notify("Capítulo aprovado e enviado para Pra upar.");
+      if (key === "reject")
+        notify("Correção solicitada. A etapa voltou para a fila.");
+      if (key === "comment") notify("Observação adicionada.");
       await load();
       refresh();
     } catch (cause) {
@@ -816,49 +1487,169 @@ function Chapter({ member, refresh, chapters }: PanelProps) {
   if (!chapter)
     return (
       <section className="page">
-        <h2>Carregando capítulo…</h2>
+        <h2>{loading ? "Carregando capítulo…" : "Capítulo não encontrado"}</h2>
+        {!loading && (
+          <Link className="secondary" to="/">
+            Voltar ao início
+          </Link>
+        )}
         {error && <small className="error">{error}</small>}
       </section>
     );
   const review = chapter.chapter_stages.find((item) => item.stage === "REVIEW");
+  const myStage = chapter.chapter_stages.find(
+    (stage) =>
+      stage.status === "IN_PROGRESS" &&
+      stage.assigned_to === member.user_id &&
+      stage.stage !== "READY" &&
+      allowed(member, stageRole[stage.stage] as Role),
+  );
+  const claimableStage = chapter.chapter_stages.find((stage) => {
+    if (stage.status !== "AVAILABLE" || stage.stage === "READY") return false;
+    return allowed(member, stageRole[stage.stage] as Role);
+  });
+  const ready = chapter.chapter_stages.some(
+    (stage) => stage.stage === "READY" && stage.status === "COMPLETED",
+  );
+  const chapterState = chapter.published_at
+    ? "Upado"
+    : ready
+      ? "Pronto pra upar"
+      : myStage
+        ? `${stageLabel[myStage.stage]} com você`
+        : "Em produção";
   return (
-    <section className="page">
-      <div className="page-heading">
+    <section className="page chapter-page">
+      <div className="page-heading chapter-title">
+        <Link
+          className="back-link"
+          to={chapter.published_at ? "/published" : "/"}
+        >
+          ← Voltar
+        </Link>
         <p className="eyebrow">CENTRAL DO CAPÍTULO</p>
-        <h2>
-          {chapter.work?.title} #{chapter.number}
-        </h2>
-        <p>Workflow, arquivos, créditos e histórico em um só lugar.</p>
+        <div>
+          <h2>
+            {chapter.work?.title} #{chapter.number}
+          </h2>
+          <span className="chapter-state">{chapterState}</span>
+        </div>
       </div>
-      {error && <p className="error">{error}</p>}
+      {error && <Feedback kind="error">{error}</Feedback>}
+      {myStage && myStage.stage !== "REVIEW" && (
+        <section className="chapter-focus">
+          <QueueHeading
+            title="O que você precisa fazer"
+            count={1}
+            help="Siga os passos abaixo na ordem."
+          />
+          <StageWorkCard
+            entry={{ chapter, stage: myStage }}
+            artifacts={artifacts}
+            filesLoading={false}
+            refresh={refresh}
+            reloadFiles={load}
+            showDetails={false}
+          />
+        </section>
+      )}
+      {!myStage && claimableStage && (
+        <section className="chapter-focus">
+          <QueueHeading
+            title="Este capítulo está disponível"
+            count={1}
+            help={`Você pode assumir ${stageLabel[claimableStage.stage]} agora.`}
+          />
+          <AvailableStageCard
+            entry={{ chapter, stage: claimableStage }}
+            refresh={refresh}
+          />
+        </section>
+      )}
+      {review?.status === "IN_PROGRESS" &&
+        (review.assigned_to === member.user_id || member.is_admin) && (
+          <section className="chapter-focus review-focus">
+            <QueueHeading
+              title="Revisar e decidir"
+              count={1}
+              help="Baixe o Type, confira e escolha uma decisão."
+            />
+            {artifacts
+              .filter((file) => file.stage === "TYPESET" && file.is_current)
+              .map((file) => (
+                <button
+                  className="action-button download-action"
+                  key={file.id}
+                  onClick={() =>
+                    void run(`download-${file.id}`, () =>
+                      downloadArtifact(file.provider, file.provider_key),
+                    )
+                  }
+                >
+                  <span>1</span>
+                  <div>
+                    <strong>Baixar Type para revisar</strong>
+                    <small>Versão {file.version}</small>
+                  </div>
+                </button>
+              ))}
+            <div className="review-decisions">
+              <button
+                className="approve-action big-action"
+                disabled={!!busy}
+                onClick={() =>
+                  void run("approve", () => reviewChapter(review.id, true))
+                }
+              >
+                {busy === "approve" ? "Aprovando…" : "Aprovar capítulo"}
+              </button>
+              <details>
+                <summary>Solicitar correção</summary>
+                <div className="review-form">
+                  <label>
+                    Voltar para
+                    <select
+                      value={returnStage}
+                      onChange={(event) =>
+                        setReturnStage(event.target.value as Stage)
+                      }
+                    >
+                      <option value="TYPESET">Type</option>
+                      <option value="TRANSLATION">Tradução</option>
+                      <option value="CLEAN_REDRAW">Clean / Redraw</option>
+                    </select>
+                  </label>
+                  <label>
+                    O que precisa ser corrigido?
+                    <textarea
+                      value={reason}
+                      onChange={(event) => setReason(event.target.value)}
+                      placeholder="Explique de forma objetiva para quem receber a correção."
+                    />
+                  </label>
+                  <button
+                    className="danger big-action"
+                    disabled={!reason.trim() || !!busy}
+                    onClick={() =>
+                      void run("reject", () =>
+                        reviewChapter(review.id, false, reason, returnStage),
+                      )
+                    }
+                  >
+                    {busy === "reject"
+                      ? "Enviando correção…"
+                      : "Devolver para correção"}
+                  </button>
+                </div>
+              </details>
+            </div>
+          </section>
+        )}
       <div className="chapter-layout">
         <div>
-          <Panel title="Workflow">
+          <Panel title="Andamento">
             <div className="workflow">
               {chapter.chapter_stages.map((stage) => {
-                const role =
-                  stage.stage === "READY"
-                    ? "ADMIN"
-                    : stageRole[stage.stage as keyof typeof stageRole];
-                const mayClaim =
-                  stage.status === "AVAILABLE" && allowed(member, role as Role);
-                const owns =
-                  stage.assigned_to === member.user_id || member.is_admin;
-                const mayWork =
-                  owns &&
-                  stage.status === "IN_PROGRESS" &&
-                  !["REVIEW", "READY"].includes(stage.stage);
-                const current = artifacts.find(
-                  (a) => a.stage === stage.stage && a.is_current,
-                );
-                const dependencies =
-                  stage.stage === "TYPESET"
-                    ? artifacts.filter(
-                        (a) =>
-                          a.is_current &&
-                          ["CLEAN_REDRAW", "TRANSLATION"].includes(a.stage),
-                      )
-                    : [];
                 return (
                   <article
                     className={`stage-step ${stage.status.toLowerCase()}`}
@@ -883,169 +1674,52 @@ function Chapter({ member, refresh, chapters }: PanelProps) {
                           Motivo: {stage.rejection_reason}
                         </small>
                       )}
-                      {dependencies.length > 0 && (
-                        <div className="stage-actions">
-                          {dependencies.map((file) => (
-                            <button
-                              className="secondary"
-                              key={file.id}
-                              onClick={() =>
-                                void run(`download-${file.id}`, () =>
-                                  downloadArtifact(
-                                    file.provider,
-                                    file.provider_key,
-                                  ),
-                                )
-                              }
-                            >
-                              {stageLabel[file.stage]} mais recente · Baixar
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                      {mayClaim && (
-                        <button
-                          className="primary"
-                          disabled={!!busy}
-                          onClick={() =>
-                            void run(`claim-${stage.id}`, () =>
-                              claimStage(stage.id),
-                            )
-                          }
-                        >
-                          Assumir
-                        </button>
-                      )}
-                      {mayWork && (
-                        <div className="stage-actions">
-                          <input
-                            type="file"
-                            onChange={(event) =>
-                              setFiles({
-                                ...files,
-                                [stage.id]: event.target.files?.[0],
-                              })
-                            }
-                          />
-                          <button
-                            className="secondary"
-                            disabled={!files[stage.id] || !!busy}
-                            onClick={() =>
-                              void run(`upload-${stage.id}`, () =>
-                                uploadArtifact({
-                                  chapterId: chapter.id,
-                                  stage: stage.stage,
-                                  file: files[stage.id]!,
-                                }),
-                              )
-                            }
-                          >
-                            {busy === `upload-${stage.id}`
-                              ? "Enviando…"
-                              : "Enviar versão"}
-                          </button>
-                          <button
-                            className="primary"
-                            disabled={!current || !!busy}
-                            onClick={() =>
-                              void run(`complete-${stage.id}`, () =>
-                                completeStage(stage.id),
-                              )
-                            }
-                          >
-                            {busy === `complete-${stage.id}`
-                              ? "Concluindo…"
-                              : "Concluir"}
-                          </button>
-                        </div>
-                      )}
                     </div>
                   </article>
                 );
               })}
             </div>
           </Panel>
-          {review?.status === "IN_PROGRESS" &&
-            (review.assigned_to === member.user_id || member.is_admin) && (
-              <Panel title="Decisão do QC">
-                <div className="review-form">
-                  <button
-                    className="primary"
-                    disabled={!!busy}
-                    onClick={() =>
-                      void run("approve", () => reviewChapter(review.id, true))
-                    }
-                  >
-                    Aprovar capítulo
-                  </button>
-                  <label>
-                    Retornar para
-                    <select
-                      value={returnStage}
-                      onChange={(event) =>
-                        setReturnStage(event.target.value as Stage)
+          <details className="chapter-details">
+            <summary>
+              Arquivos e versões anteriores ({artifacts.length})
+            </summary>
+            <Panel title="Arquivos">
+              {artifacts.length ? (
+                artifacts.map((file) => (
+                  <article className="artifact" key={file.id}>
+                    <div>
+                      <strong>
+                        {stageLabel[file.stage]} v{file.version}
+                      </strong>
+                      {file.is_current && <span className="badge">Atual</span>}
+                      <small>
+                        {file.original_name} · {formatBytes(file.byte_size)}
+                      </small>
+                    </div>
+                    <button
+                      className="secondary"
+                      disabled={!!busy}
+                      onClick={() =>
+                        void run(`download-${file.id}`, () =>
+                          downloadArtifact(file.provider, file.provider_key),
+                        )
                       }
                     >
-                      <option value="TYPESET">Type</option>
-                      <option value="TRANSLATION">Tradução</option>
-                      <option value="CLEAN_REDRAW">Clean / Redraw</option>
-                    </select>
-                  </label>
-                  <label>
-                    Motivo obrigatório
-                    <textarea
-                      value={reason}
-                      onChange={(event) => setReason(event.target.value)}
-                    />
-                  </label>
-                  <button
-                    className="danger"
-                    disabled={!reason.trim() || !!busy}
-                    onClick={() =>
-                      void run("reject", () =>
-                        reviewChapter(review.id, false, reason, returnStage),
-                      )
-                    }
-                  >
-                    Reprovar
-                  </button>
-                </div>
-              </Panel>
-            )}
-          <Panel title="Arquivos e versões">
-            {artifacts.length ? (
-              artifacts.map((file) => (
-                <article className="artifact" key={file.id}>
-                  <div>
-                    <strong>
-                      {stageLabel[file.stage]} v{file.version}
-                    </strong>
-                    {file.is_current && <span className="badge">Atual</span>}
-                    <small>
-                      {file.original_name} · {formatBytes(file.byte_size)}
-                    </small>
-                  </div>
-                  <button
-                    className="secondary"
-                    disabled={!!busy}
-                    onClick={() =>
-                      void run(`download-${file.id}`, () =>
-                        downloadArtifact(file.provider, file.provider_key),
-                      )
-                    }
-                  >
-                    Baixar
-                  </button>
-                </article>
-              ))
-            ) : (
-              <Empty text="Nenhum arquivo enviado." />
-            )}
-          </Panel>
-          <Panel title="Comentários">
+                      Baixar
+                    </button>
+                  </article>
+                ))
+              ) : (
+                <Empty text="Nenhum arquivo enviado." />
+              )}
+            </Panel>
+          </details>
+          <Panel title="Observações">
             <div className="comment-form">
               <textarea
                 placeholder="Observação interna…"
+                aria-label="Observação interna"
                 value={body}
                 onChange={(event) => setBody(event.target.value)}
               />
@@ -1087,46 +1761,44 @@ function Chapter({ member, refresh, chapters }: PanelProps) {
           </Panel>
         </div>
         <aside className="chapter-aside">
-          <Panel title="Créditos">
-            {credits.length ? (
-              credits.map((credit) => (
-                <div className="credit" key={credit.id}>
-                  <span>{stageLabel[credit.stage]}</span>
-                  <strong>
-                    {credit.user?.display_name || credit.user?.github_login}
-                  </strong>
-                </div>
-              ))
-            ) : (
-              <Empty text="Os créditos aparecem ao concluir cada etapa." />
-            )}
+          <Panel title="Quem trabalhou">
+            <Credits credits={credits} />
           </Panel>
-          <Panel title="Histórico">
-            {activity.length ? (
-              activity.map((item) => (
-                <div className="activity" key={item.id}>
-                  <i />
-                  <p>
-                    <strong>
-                      {item.actor?.display_name ||
-                        item.actor?.github_login ||
-                        "Sistema"}
-                    </strong>{" "}
-                    {activityText(item)}
-                    <small>{formatDate(item.created_at)}</small>
-                  </p>
-                </div>
-              ))
-            ) : (
-              <Empty text="Nenhuma atividade ainda." />
-            )}
-          </Panel>
+          <details className="chapter-details">
+            <summary>Histórico do capítulo</summary>
+            <Panel title="Últimas atividades">
+              {activity.length ? (
+                activity.map((item) => (
+                  <div className="activity" key={item.id}>
+                    <i />
+                    <p>
+                      <strong>
+                        {item.actor?.display_name ||
+                          item.actor?.github_login ||
+                          "Sistema"}
+                      </strong>{" "}
+                      {activityText(item)}
+                      {item.metadata?.reason && (
+                        <small>Motivo: {item.metadata.reason}</small>
+                      )}
+                      <small>{formatDate(item.created_at)}</small>
+                    </p>
+                  </div>
+                ))
+              ) : (
+                <Empty text="Nenhuma atividade ainda." />
+              )}
+            </Panel>
+          </details>
         </aside>
       </div>
     </section>
   );
 }
 function Notifications({ refresh, notifications }: PanelProps) {
+  const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [items, setItems] = useState<
     {
       id: string;
@@ -1141,34 +1813,67 @@ function Notifications({ refresh, notifications }: PanelProps) {
       ?.from("notifications")
       .select("id,body,link_path,read_at")
       .order("created_at", { ascending: false })
-      .then(({ data }) => setItems(data ?? []));
+      .limit(50)
+      .then(({ data, error }) => {
+        setItems(data ?? []);
+        setLoading(false);
+        setError(error ? messageOf(error) : "");
+      });
   useEffect(load, [notifications]);
+  const run = async (action: () => Promise<void>) => {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await action();
+      load();
+      await refresh();
+    } catch (cause) {
+      setError(messageOf(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
   const open = async (item: (typeof items)[number]) => {
     if (!item.read_at) await markNotificationRead(item.id);
-    refresh();
-    load();
     nav((item.link_path || "/notifications").replace(/^#/, ""));
   };
   return (
     <section className="page">
-      <h2>Notificações</h2>
+      <div className="page-heading">
+        <p className="eyebrow">AVISOS DA STAFF</p>
+        <h2>Notificações</h2>
+        <p>Novos trabalhos e atualizações dos seus capítulos.</p>
+      </div>
+      {error && <Feedback kind="error">{error}</Feedback>}
       <button
         className="secondary"
-        onClick={() => void markAllNotificationsRead().then(load)}
+        disabled={busy || !notifications}
+        onClick={() => void run(markAllNotificationsRead)}
       >
         Marcar todas como lidas
       </button>
-      <Panel title="Todas">
+      <Panel title="Últimos avisos">
         {items.map((item) => (
           <button
-            className="notification"
+            className={`notification ${item.read_at ? "read" : "unread"}`}
             key={item.id}
-            onClick={() => void open(item)}
+            disabled={busy}
+            onClick={() => void run(() => open(item))}
           >
-            {item.body}
+            <span>{item.body}</span>
+            <small>{item.read_at ? "Abrir →" : "Novo · Abrir →"}</small>
           </button>
         ))}
-        {!items.length && <Empty text="Nenhuma notificação." />}
+        {!items.length && (
+          <Empty
+            text={
+              loading
+                ? "Carregando avisos…"
+                : "Você está em dia. Novos avisos aparecerão aqui."
+            }
+          />
+        )}
       </Panel>
     </section>
   );
@@ -1607,6 +2312,7 @@ const activityText = (item: ActivityItem) => {
       rejected: `reprovou e devolveu para ${item.metadata?.return_stage ? stageLabel[item.metadata.return_stage as Stage] : "correção"}`,
       stage_available: "disponibilizou",
       production_started: "iniciou a produção em",
+      published: "marcou o capítulo como upado",
     }[item.action] || item.action;
   return `${action}${item.stage && !["approved", "rejected"].includes(item.action) ? ` ${stageLabel[item.stage]}` : ""}`;
 };

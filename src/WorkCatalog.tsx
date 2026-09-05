@@ -54,6 +54,7 @@ export function SimpleWorkCatalog({ member }: { member: StaffMember }) {
   const [end, setEnd] = useState("");
   const [busy, setBusy] = useState("");
   const [feedback, setFeedback] = useState("");
+  const [page, setPage] = useState(0);
 
   const load = useCallback(async () => {
     if (!id || !supabase) return;
@@ -91,6 +92,8 @@ export function SimpleWorkCatalog({ member }: { member: StaffMember }) {
     try {
       await action();
       await load();
+      if (key === "work") setFeedback("Informações da obra salvas.");
+      if (key === "cover") setFeedback("Capa atualizada.");
     } catch (error) {
       setFeedback(
         error instanceof Error
@@ -129,7 +132,7 @@ export function SimpleWorkCatalog({ member }: { member: StaffMember }) {
         )
       )
         throw new Error(
-          "Capítulos que já entraram em produção são atualizados automaticamente pelo workflow.",
+          "Este capítulo já está com a staff. O status acompanha a conclusão do trabalho.",
         );
       const { error } = await supabase!.rpc("update_catalog_chapters", {
         p_ids: ids,
@@ -168,6 +171,9 @@ export function SimpleWorkCatalog({ member }: { member: StaffMember }) {
       ),
     [chapters, filter],
   );
+  const pageCount = Math.max(1, Math.ceil(visible.length / 30));
+  const currentPage = Math.min(page, pageCount - 1);
+  const pageChapters = visible.slice(currentPage * 30, currentPage * 30 + 30);
   const selectedHasProduction = chapters.some(
     (chapter) => selected.has(chapter.id) && chapter.production.length > 0,
   );
@@ -208,9 +214,7 @@ export function SimpleWorkCatalog({ member }: { member: StaffMember }) {
           <b>{chapters.length - counts.completed - counts.production}</b>A fazer
         </span>
       </div>
-      {member.is_admin && (
-        <WorkForm work={work} busy={busy} run={run} />
-      )}
+      {member.is_admin && <WorkForm work={work} busy={busy} run={run} />}
       {member.is_admin && (
         <section className="panel chapter-create">
           <div className="panel-heading">
@@ -223,13 +227,13 @@ export function SimpleWorkCatalog({ member }: { member: StaffMember }) {
                 className={mode === "single" ? "active" : ""}
                 onClick={() => setMode("single")}
               >
-                Adicionar capítulo
+                Um capítulo
               </button>
               <button
                 className={mode === "range" ? "active" : ""}
                 onClick={() => setMode("range")}
               >
-                Adicionar vários capítulos
+                Vários capítulos
               </button>
             </div>
           </div>
@@ -271,18 +275,18 @@ export function SimpleWorkCatalog({ member }: { member: StaffMember }) {
           )}
           <button
             className="primary"
-            disabled={busy === "add"}
+            disabled={!!busy || !parseChapterRange(mode, single, start, end)}
             onClick={() => void add()}
           >
-            {busy === "add"
-              ? "Adicionando…"
-              : mode === "single"
-                ? "Adicionar capítulo"
-                : "Adicionar vários capítulos"}
+            {busy === "add" ? "Adicionando…" : "Adicionar"}
           </button>
         </section>
       )}
-      {feedback && <p className="notice">{feedback}</p>}
+      {feedback && (
+        <p className="notice" role="status">
+          {feedback}
+        </p>
+      )}
       <section className="panel catalog-list-panel">
         <div className="panel-heading">
           <div>
@@ -295,7 +299,11 @@ export function SimpleWorkCatalog({ member }: { member: StaffMember }) {
                 <button
                   className={filter === value ? "active" : ""}
                   key={value}
-                  onClick={() => setFilter(value)}
+                  onClick={() => {
+                    setFilter(value);
+                    setPage(0);
+                    setSelected(new Set());
+                  }}
                 >
                   {value === "ALL" ? "Todos" : labels[value]}
                 </button>
@@ -339,20 +347,22 @@ export function SimpleWorkCatalog({ member }: { member: StaffMember }) {
           <label className="select-all">
             <input
               type="checkbox"
-              checked={visible.every((chapter) => selected.has(chapter.id))}
+              checked={pageChapters.every((chapter) =>
+                selected.has(chapter.id),
+              )}
               onChange={(event) =>
                 setSelected(
                   event.target.checked
-                    ? new Set(visible.map((chapter) => chapter.id))
+                    ? new Set(pageChapters.map((chapter) => chapter.id))
                     : new Set(),
                 )
               }
             />
-            Selecionar todos desta lista
+            Selecionar todos desta página
           </label>
         )}
         <div className="catalog-list">
-          {visible.map((chapter) => (
+          {pageChapters.map((chapter) => (
             <article
               className={`catalog-row${member.is_admin ? "" : " viewer"}`}
               key={chapter.id}
@@ -360,6 +370,7 @@ export function SimpleWorkCatalog({ member }: { member: StaffMember }) {
               {member.is_admin && (
                 <input
                   type="checkbox"
+                  aria-label={`Selecionar capítulo ${chapter.number}`}
                   checked={selected.has(chapter.id)}
                   onChange={() =>
                     setSelected((current) => {
@@ -384,13 +395,13 @@ export function SimpleWorkCatalog({ member }: { member: StaffMember }) {
                   </summary>
                   <div>
                     <button
-                      disabled={chapter.production.length > 0}
+                      disabled={!!busy || chapter.production.length > 0}
                       onClick={() => void updateStatus([chapter.id], "TODO")}
                     >
                       Marcar como A fazer
                     </button>
                     <button
-                      disabled={chapter.production.length > 0}
+                      disabled={!!busy || chapter.production.length > 0}
                       onClick={() =>
                         void updateStatus([chapter.id], "COMPLETED")
                       }
@@ -400,6 +411,7 @@ export function SimpleWorkCatalog({ member }: { member: StaffMember }) {
                     <button
                       className="danger-text"
                       disabled={
+                        !!busy ||
                         !canRemoveCatalogChapter(
                           chapter.status,
                           chapter.production.length > 0,
@@ -411,7 +423,7 @@ export function SimpleWorkCatalog({ member }: { member: StaffMember }) {
                         chapter.status,
                         chapter.production.length > 0,
                       )
-                        ? "Possui produção — não removível"
+                        ? "Protegido: já entrou em produção"
                         : "Remover capítulo"}
                     </button>
                   </div>
@@ -422,6 +434,27 @@ export function SimpleWorkCatalog({ member }: { member: StaffMember }) {
         </div>
         {!visible.length && (
           <p className="empty">Nenhum capítulo neste filtro.</p>
+        )}
+        {pageCount > 1 && (
+          <div className="pagination">
+            <button
+              className="secondary"
+              disabled={!currentPage}
+              onClick={() => setPage(currentPage - 1)}
+            >
+              Anterior
+            </button>
+            <span>
+              {currentPage + 1} de {pageCount}
+            </span>
+            <button
+              className="secondary"
+              disabled={currentPage + 1 >= pageCount}
+              onClick={() => setPage(currentPage + 1)}
+            >
+              Próxima
+            </button>
+          </div>
         )}
       </section>
     </section>
@@ -440,12 +473,15 @@ function WorkForm({
   const [title, setTitle] = useState(work.title);
   const [synopsis, setSynopsis] = useState(work.synopsis);
   const [otherNames, setOtherNames] = useState(work.aliases.join(", "));
+  const [status, setStatus] = useState(work.status);
   const [coverUrl, setCoverUrl] = useState("");
+  const savedNames = work.aliases.join(", ");
   useEffect(() => {
     setTitle(work.title);
     setSynopsis(work.synopsis);
-    setOtherNames(work.aliases.join(", "));
-  }, [work]);
+    setOtherNames(savedNames);
+    setStatus(work.status);
+  }, [work.id, work.title, work.synopsis, work.status, savedNames]);
   useEffect(() => {
     let active = true;
     setCoverUrl("");
@@ -467,6 +503,7 @@ function WorkForm({
         .update({
           title: title.trim(),
           synopsis: synopsis.trim(),
+          status,
           aliases: otherNames
             .split(",")
             .map((value) => value.trim())
@@ -564,6 +601,19 @@ function WorkForm({
               value={synopsis}
               onChange={(event) => setSynopsis(event.target.value)}
             />
+          </label>
+          <label className="simple-field">
+            <span>Status</span>
+            <select
+              value={status}
+              onChange={(event) =>
+                setStatus(event.target.value as Work["status"])
+              }
+            >
+              <option value="ACTIVE">Ativa</option>
+              <option value="PAUSED">Pausada</option>
+              <option value="COMPLETED">Concluída</option>
+            </select>
           </label>
           <button
             className="primary"

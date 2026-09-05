@@ -4,3 +4,6 @@ dist
 .env.*
 !.env.example
 coverage
+supabase/.temp/
+test-results/
+playwright-report/

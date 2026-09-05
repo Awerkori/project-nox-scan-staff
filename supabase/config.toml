@@ -1,0 +1,4 @@
+project_id = "project-nox-scan-staff"
+
+[functions.send-production-emails]
+verify_jwt = false

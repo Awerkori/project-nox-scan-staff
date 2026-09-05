@@ -2,6 +2,7 @@ import {
   Component,
   useCallback,
   useEffect,
+  useRef,
   useState,
   type ErrorInfo,
   type ReactNode,
@@ -12,7 +13,10 @@ import type { Session } from "@supabase/supabase-js";
 import { configured, supabase } from "./lib/supabase";
 import { subscribeToProduction } from "./lib/production";
 import { PanelRoutes } from "./Panel";
+import { fetchChapters } from "./lib/chapters";
 import type { Chapter, Role, StaffMember } from "./types";
+import "@fontsource-variable/dm-sans";
+import "@fontsource/marcellus/400.css";
 import "./styles.css";
 
 type AuthStatus =
@@ -58,82 +62,110 @@ function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [member, setMember] = useState<StaffMember | null>(null);
   const [chapters, setChapters] = useState<Chapter[]>([]);
+  const [publicationAvailable, setPublicationAvailable] = useState(true);
   const [notifications, setNotifications] = useState(0);
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
   const [authStatus, setAuthStatus] = useState<AuthStatus>("checking-session");
+  const loading = useRef<Promise<void> | null>(null);
+  const currentUser = useRef<string | null>(null);
   const load = useCallback(async () => {
     if (!session || !supabase) return;
-    setAuthStatus("checking-access");
-    setError("");
-    try {
-      const { data: staff, error: staffError } = await supabase
-        .from("staff_members")
-        .select(
-          "user_id,github_login,display_name,is_admin,user_roles(roles(code))",
-        )
-        .eq("user_id", session.user.id)
-        .eq("is_active", true)
-        .maybeSingle();
-      if (staffError) {
+    const client = supabase;
+    if (loading.current) return loading.current;
+    const work = async () => {
+      setError("");
+      try {
+        const { error: accessError } = await client.rpc("claim_staff_invite");
+        if (currentUser.current !== session.user.id) return;
+        if (accessError) {
+          setMember(null);
+          setAuthStatus("unauthorized");
+          setError(accessError.message);
+          return;
+        }
+        const { data: staff, error: staffError } = await client
+          .from("staff_members")
+          .select(
+            "user_id,github_login,display_name,is_admin,user_roles(roles(code))",
+          )
+          .eq("user_id", session.user.id)
+          .eq("is_active", true)
+          .maybeSingle();
+        if (currentUser.current !== session.user.id) return;
+        if (staffError) {
+          setMember(null);
+          setAuthStatus("error");
+          setError(
+            `Não foi possível verificar seu acesso: ${staffError.message}`,
+          );
+          return;
+        }
+        if (!staff) {
+          setMember(null);
+          setAuthStatus("unauthorized");
+          setError("Acesso não autorizado");
+          return;
+        }
+        type StaffRoleRow = { roles: { code: Role } | null };
+        const staffRoles =
+          (staff.user_roles as unknown as StaffRoleRow[] | null) ?? [];
+        const roles = staffRoles.flatMap((item) =>
+          item.roles?.code ? [item.roles.code] : [],
+        );
+        setMember({
+          user_id: staff.user_id,
+          github_login: staff.github_login,
+          display_name: staff.display_name,
+          is_admin: staff.is_admin,
+          roles,
+        });
+        setAuthStatus("authorized");
+        const returnPath = sessionStorage.getItem("nox-return-path");
+        if (returnPath?.startsWith("/") && !returnPath.startsWith("//")) {
+          sessionStorage.removeItem("nox-return-path");
+          window.location.hash = returnPath;
+        }
+        const {
+          data,
+          error: chapterError,
+          publicationAvailable: available,
+        } = await fetchChapters();
+        if (currentUser.current !== session.user.id) return;
+        setPublicationAvailable(available);
+        if (chapterError) {
+          setError(
+            `Não foi possível carregar os capítulos: ${chapterError.message}`,
+          );
+          setChapters([]);
+        } else setChapters((data ?? []) as unknown as Chapter[]);
+        const { count, error: notificationError } = await client
+          .from("notifications")
+          .select("*", { count: "exact", head: true })
+          .eq("recipient_id", session.user.id)
+          .is("read_at", null);
+        if (notificationError)
+          setError(
+            `Não foi possível carregar notificações: ${notificationError.message}`,
+          );
+        else setNotifications(count ?? 0);
+      } catch (cause) {
+        if (currentUser.current !== session.user.id) return;
         setMember(null);
         setAuthStatus("error");
         setError(
-          `Não foi possível verificar seu acesso: ${staffError.message}`,
+          cause instanceof Error
+            ? `Erro inesperado ao carregar seu acesso: ${cause.message}`
+            : "Erro inesperado ao carregar seu acesso.",
         );
-        return;
       }
-      if (!staff) {
-        setMember(null);
-        setAuthStatus("unauthorized");
-        setError("Acesso não autorizado");
-        return;
-      }
-      type StaffRoleRow = { roles: { code: Role } | null };
-      const staffRoles =
-        (staff.user_roles as unknown as StaffRoleRow[] | null) ?? [];
-      const roles = staffRoles.flatMap((item) =>
-        item.roles?.code ? [item.roles.code] : [],
-      );
-      setMember({
-        user_id: staff.user_id,
-        github_login: staff.github_login,
-        display_name: staff.display_name,
-        is_admin: staff.is_admin,
-        roles,
-      });
-      setAuthStatus("authorized");
-      const { data, error: chapterError } = await supabase
-        .from("chapters")
-        .select(
-          "id,number,title,work:works(id,title),chapter_stages(id,chapter_id,stage,status,assigned_to,assigned_at,completed_at,assignee:profiles!chapter_stages_assigned_to_fkey(display_name,github_login,avatar_url))",
-        )
-        .order("created_at", { ascending: false })
-        .limit(100);
-      if (chapterError) {
-        setError(
-          `Não foi possível carregar os capítulos: ${chapterError.message}`,
-        );
-        setChapters([]);
-      } else setChapters((data ?? []) as unknown as Chapter[]);
-      const { count, error: notificationError } = await supabase
-        .from("notifications")
-        .select("*", { count: "exact", head: true })
-        .is("read_at", null);
-      if (notificationError)
-        setError(
-          `Não foi possível carregar notificações: ${notificationError.message}`,
-        );
-      else setNotifications(count ?? 0);
-    } catch (cause) {
-      setMember(null);
-      setAuthStatus("error");
-      setError(
-        cause instanceof Error
-          ? `Erro inesperado ao carregar seu acesso: ${cause.message}`
-          : "Erro inesperado ao carregar seu acesso.",
-      );
-    }
+    };
+    const promise = work();
+    loading.current = promise;
+    void promise.finally(() => {
+      if (loading.current === promise) loading.current = null;
+    });
+    return promise;
   }, [session]);
   const claimInvite = async () => {
     if (!supabase) return;
@@ -144,21 +176,29 @@ function App() {
   };
   useEffect(() => {
     if (!supabase) return;
+    const acceptSession = (next: Session | null) => {
+      const id = next?.user.id ?? null;
+      if (currentUser.current === id && next) return;
+      currentUser.current = id;
+      loading.current = null;
+      setSession(next);
+      setMember(null);
+      setChapters([]);
+      setAuthStatus(next ? "checking-access" : "unauthenticated");
+    };
     supabase.auth
       .getSession()
       .then(({ data }) => {
-        setSession(data.session);
-        setAuthStatus(data.session ? "checking-access" : "unauthenticated");
+        acceptSession(data.session);
       })
       .catch(() => {
         setAuthStatus("error");
         setError("Não foi possível verificar a sessão.");
       });
     const { data: listener } = supabase.auth.onAuthStateChange(
-      (_event, next) => {
-        setSession(next);
-        setMember(null);
-        setAuthStatus(next ? "checking-access" : "unauthenticated");
+      (event, next) => {
+        if (event === "TOKEN_REFRESHED" || event === "USER_UPDATED") return;
+        acceptSession(next);
       },
     );
     return () => listener.subscription.unsubscribe();
@@ -166,11 +206,18 @@ function App() {
   useEffect(() => {
     if (!session) return;
     void load();
-    const channel = subscribeToProduction(() => {
-      setToast("Produção atualizada em tempo real.");
-      void load();
-    });
+    let timer: ReturnType<typeof setTimeout>;
+    const sync = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => void load(), 350);
+    };
+    const channel = subscribeToProduction(sync);
+    const fallback = window.setInterval(sync, 30000);
+    window.addEventListener("focus", sync);
     return () => {
+      clearTimeout(timer);
+      clearInterval(fallback);
+      window.removeEventListener("focus", sync);
       if (channel && supabase) void supabase.removeChannel(channel);
     };
   }, [load, session]);
@@ -197,11 +244,17 @@ function App() {
     return (
       <Gate message="Acesso não autorizado">
         <p>
-          Se a staff enviou um convite depois do seu primeiro login, você pode
-          vinculá-lo com segurança à conta GitHub autenticada.
+          Seu acesso precisa ser liberado pela administração. Confira se entrou
+          com a mesma conta GitHub informada no convite.
         </p>
         <button className="primary" onClick={() => void claimInvite()}>
           Verificar convite
+        </button>
+        <button
+          className="secondary"
+          onClick={() => void supabase?.auth.signOut()}
+        >
+          Usar outra conta
         </button>
         {error && <p className="error">{error}</p>}
       </Gate>
@@ -230,7 +283,9 @@ function App() {
         chapters={chapters}
         notifications={notifications}
         toast={toast}
-        refresh={() => void load()}
+        error={error}
+        publicationAvailable={publicationAvailable}
+        refresh={load}
         logout={() => void supabase?.auth.signOut()}
       />
     </HashRouter>
@@ -238,18 +293,35 @@ function App() {
 }
 
 function Login() {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
   const signIn = async () => {
+    if (busy) return;
+    setBusy(true);
+    const path = window.location.hash.slice(1);
+    if (path.startsWith("/") && !path.startsWith("//"))
+      sessionStorage.setItem("nox-return-path", path);
     const { error } = await supabase!.auth.signInWithOAuth({
       provider: "github",
-      options: { redirectTo: window.location.href },
+      options: {
+        redirectTo: `${window.location.origin}${import.meta.env.BASE_URL}`,
+      },
     });
-    if (error) alert(error.message);
+    if (error) {
+      setError(error.message);
+      setBusy(false);
+    }
   };
   return (
     <Gate message="Project Nox Scan Staff">
-      <button className="primary" onClick={() => void signIn()}>
-        Entrar com GitHub
+      <button className="primary" disabled={busy} onClick={() => void signIn()}>
+        {busy ? "Abrindo GitHub…" : "Entrar com GitHub"}
       </button>
+      {error && (
+        <p role="alert" className="error">
+          {error}
+        </p>
+      )}
       <p>
         Somente membros autorizados da staff podem acessar dados de produção.
       </p>
