@@ -21,6 +21,7 @@ import {
   uploadArtifact,
 } from "./lib/production";
 import { supabase } from "./lib/supabase";
+import { SimpleWorkCatalog } from "./WorkCatalog";
 import { stageLabel, stageRole } from "./workflow";
 import type {
   Artifact,
@@ -128,7 +129,10 @@ export function PanelRoutes(props: PanelProps) {
           }
         />
         <Route path="works" element={<Works {...props} />} />
-        <Route path="works/:id" element={<Work {...props} />} />
+        <Route
+          path="works/:id"
+          element={<SimpleWorkCatalog member={props.member} />}
+        />
         <Route path="chapters/:id" element={<Chapter {...props} />} />
         <Route path="notifications" element={<Notifications {...props} />} />
         {props.member.is_admin && (
@@ -652,7 +656,7 @@ function Works({ member }: PanelProps) {
             <input
               value={aliases}
               onChange={(e) => setAliases(e.target.value)}
-              placeholder="Aliases separados por vírgula"
+              placeholder="Outros nomes, separados por vírgula"
             />
             <button className="primary" onClick={() => void create()}>
               Criar obra
@@ -703,324 +707,6 @@ function Works({ member }: PanelProps) {
       </section>
       {!works.length && <Empty text={error || "Nenhuma obra cadastrada."} />}
     </section>
-  );
-}
-function Work({ member }: PanelProps) {
-  const { id } = useParams();
-  const [work, setWork] = useState<WorkRow | null>(null);
-  const [catalog, setCatalog] = useState<
-    {
-      id: string;
-      number: number;
-      status: "TODO" | "IN_PRODUCTION" | "COMPLETED";
-    }[]
-  >([]);
-  const [filter, setFilter] = useState("ALL");
-  const [start, setStart] = useState("1");
-  const [end, setEnd] = useState("");
-  const [status, setStatus] = useState("TODO");
-  const [message, setMessage] = useState("");
-  const [busy, setBusy] = useState(false);
-  const load = () => {
-    void supabase
-      ?.from("works")
-      .select("id,title,aliases,status,synopsis,cover_path")
-      .eq("id", id)
-      .maybeSingle()
-      .then(({ data }) => setWork(data as WorkRow | null));
-    void supabase
-      ?.from("work_chapter_catalog")
-      .select("id,number,status")
-      .eq("work_id", id)
-      .order("number")
-      .then(({ data }) => setCatalog((data ?? []) as typeof catalog));
-  };
-  useEffect(load, [id]);
-  const range = async (applyStatus = false) => {
-    if (!id || !supabase || busy) return;
-    setBusy(true);
-    const rpc = applyStatus
-      ? "set_catalog_chapter_status_range"
-      : "add_catalog_chapter_range";
-    const args = applyStatus
-      ? {
-          p_work_id: id,
-          p_start: Number(start),
-          p_end: Number(end || start),
-          p_status: status,
-        }
-      : { p_work_id: id, p_start: Number(start), p_end: Number(end || start) };
-    const { data, error } = await supabase.rpc(rpc, args);
-    setBusy(false);
-    setMessage(
-      error
-        ? messageOf(error)
-        : applyStatus
-          ? `${data} capítulos atualizados.`
-          : `${data?.[0]?.added ?? 0} adicionados; ${data?.[0]?.existing ?? 0} já existentes.`,
-    );
-    load();
-  };
-  const cover = async (file?: File) => {
-    if (
-      !file ||
-      !work ||
-      !["image/jpeg", "image/png", "image/webp"].includes(file.type)
-    ) {
-      setMessage("Selecione JPG, PNG ou WEBP.");
-      return;
-    }
-    setBusy(true);
-    const ext =
-      file.type === "image/png"
-        ? "png"
-        : file.type === "image/webp"
-          ? "webp"
-          : "jpg";
-    const path = `${work.id}/${crypto.randomUUID()}.${ext}`;
-    const { error: uploadError } = await supabase!.storage
-      .from("work-covers")
-      .upload(path, file, { contentType: file.type });
-    if (!uploadError) {
-      const { error } = await supabase!
-        .from("works")
-        .update({ cover_path: path })
-        .eq("id", work.id);
-      setMessage(error ? messageOf(error) : "Capa atualizada.");
-      load();
-    } else setMessage(messageOf(uploadError));
-    setBusy(false);
-  };
-  const removeCover = async () => {
-    if (!work?.cover_path) return;
-    setBusy(true);
-    const old = work.cover_path;
-    const { error } = await supabase!
-      .from("works")
-      .update({ cover_path: null })
-      .eq("id", work.id);
-    if (!error) {
-      await supabase!.storage.from("work-covers").remove([old]);
-      load();
-    }
-    setMessage(error ? messageOf(error) : "Capa removida.");
-    setBusy(false);
-  };
-  const visible = catalog.filter(
-    (item) => filter === "ALL" || item.status === filter,
-  );
-  const counts = {
-    total: catalog.length,
-    done: catalog.filter((x) => x.status === "COMPLETED").length,
-    production: catalog.filter((x) => x.status === "IN_PRODUCTION").length,
-  };
-  return (
-    <section className="page">
-      <div className="page-heading">
-        <p className="eyebrow">CATÁLOGO</p>
-        <h2>{work?.title || "Obra"}</h2>
-        <p>{work?.synopsis}</p>
-      </div>
-      {work && (
-        <div className="stats">
-          <span>
-            <b>{counts.total}</b>Total
-          </span>
-          <span>
-            <b>{counts.done}</b>Concluídos
-          </span>
-          <span>
-            <b>{counts.production}</b>Em produção
-          </span>
-          <span>
-            <b>{counts.total - counts.done - counts.production}</b>A fazer
-          </span>
-        </div>
-      )}
-      {member.is_admin && <WorkDetailsEditor work={work} onSaved={load} />}
-      {member.is_admin && (
-        <Panel title="Administrar catálogo">
-          <div className="form-row">
-            <label>
-              De
-              <input
-                type="number"
-                min="1"
-                value={start}
-                onChange={(e) => setStart(e.target.value)}
-              />
-            </label>
-            <label>
-              Até
-              <input
-                type="number"
-                min="1"
-                value={end}
-                onChange={(e) => setEnd(e.target.value)}
-              />
-            </label>
-            <label>
-              Status
-              <select
-                value={status}
-                onChange={(e) => setStatus(e.target.value)}
-              >
-                <option value="TODO">A fazer</option>
-                <option value="COMPLETED">Concluído</option>
-              </select>
-            </label>
-            <button
-              className="primary"
-              disabled={busy}
-              onClick={() => void range()}
-            >
-              Adicionar intervalo
-            </button>
-            <button
-              className="secondary"
-              disabled={busy}
-              onClick={() => void range(true)}
-            >
-              Aplicar status
-            </button>
-          </div>
-          <div className="cover-controls">
-            <label className="secondary">
-              Trocar capa
-              <input
-                hidden
-                type="file"
-                accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
-                onChange={(e) => void cover(e.target.files?.[0])}
-              />
-            </label>
-            {work?.cover_path && (
-              <button
-                className="danger-text"
-                onClick={() => void removeCover()}
-              >
-                Remover capa
-              </button>
-            )}
-          </div>
-          {message && <small>{message}</small>}
-        </Panel>
-      )}
-      <div className="filters">
-        <button
-          className={filter === "ALL" ? "active" : ""}
-          onClick={() => setFilter("ALL")}
-        >
-          Todos
-        </button>
-        <button
-          className={filter === "COMPLETED" ? "active" : ""}
-          onClick={() => setFilter("COMPLETED")}
-        >
-          Concluídos
-        </button>
-        <button
-          className={filter === "IN_PRODUCTION" ? "active" : ""}
-          onClick={() => setFilter("IN_PRODUCTION")}
-        >
-          Em produção
-        </button>
-        <button
-          className={filter === "TODO" ? "active" : ""}
-          onClick={() => setFilter("TODO")}
-        >
-          A fazer
-        </button>
-      </div>
-      <section className="catalog-grid">
-        {visible.map((item) => (
-          <button
-            key={item.id}
-            className={`catalog-chip ${item.status.toLowerCase()}`}
-            disabled={!member.is_admin}
-            onClick={() => {
-              if (member.is_admin) {
-                setStart(String(item.number));
-                setEnd(String(item.number));
-              }
-            }}
-          >
-            <b>#{item.number}</b>
-            <span>{statusLabel(item.status)}</span>
-          </button>
-        ))}
-      </section>
-    </section>
-  );
-}
-function WorkDetailsEditor({
-  work,
-  onSaved,
-}: {
-  work: WorkRow | null;
-  onSaved: () => void;
-}) {
-  const [title, setTitle] = useState(work?.title ?? "");
-  const [synopsis, setSynopsis] = useState(work?.synopsis ?? "");
-  const [aliases, setAliases] = useState((work?.aliases ?? []).join(", "));
-  const [status, setStatus] = useState(work?.status ?? "ACTIVE");
-  const [busy, setBusy] = useState(false);
-  if (!work) return null;
-  const save = async () => {
-    setBusy(true);
-    const { error } = await supabase!
-      .from("works")
-      .update({
-        title: title.trim(),
-        synopsis: synopsis.trim(),
-        aliases: aliases
-          .split(",")
-          .map((value) => value.trim())
-          .filter(Boolean),
-        status,
-      })
-      .eq("id", work.id);
-    setBusy(false);
-    if (!error) onSaved();
-  };
-  return (
-    <Panel title="Dados da obra">
-      <div className="form-row">
-        <label>
-          Título
-          <input value={title} onChange={(e) => setTitle(e.target.value)} />
-        </label>
-        <label>
-          Aliases
-          <input value={aliases} onChange={(e) => setAliases(e.target.value)} />
-        </label>
-        <label>
-          Status
-          <select
-            value={status}
-            onChange={(e) => setStatus(e.target.value as WorkRow["status"])}
-          >
-            <option value="ACTIVE">Ativa</option>
-            <option value="PAUSED">Pausada</option>
-            <option value="COMPLETED">Concluída</option>
-          </select>
-        </label>
-      </div>
-      <label>
-        Sinopse
-        <textarea
-          value={synopsis}
-          onChange={(e) => setSynopsis(e.target.value)}
-        />
-      </label>
-      <button
-        className="primary"
-        disabled={busy || !title.trim()}
-        onClick={() => void save()}
-      >
-        {busy ? "Salvando…" : "Salvar dados"}
-      </button>
-    </Panel>
   );
 }
 type CommentItem = {
@@ -1726,12 +1412,94 @@ function Members() {
   );
 }
 function Settings() {
+  const [deliveries, setDeliveries] = useState<
+    Array<{
+      id: string;
+      work_title: string;
+      chapter_number: string;
+      stage: Stage;
+      recipient_email: string;
+      status: "PENDING" | "PROCESSING" | "SENT" | "FAILED";
+      attempts: number;
+      last_error: string | null;
+      created_at: string;
+    }>
+  >([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const load = async () => {
+    setLoading(true);
+    setError("");
+    const { data, error: queryError } = await supabase!
+      .from("production_email_outbox")
+      .select(
+        "id,work_title,chapter_number,stage,recipient_email,status,attempts,last_error,created_at",
+      )
+      .in("status", ["PENDING", "PROCESSING", "FAILED"])
+      .order("created_at", { ascending: false })
+      .limit(20);
+    if (queryError) setError(queryError.message);
+    else setDeliveries((data ?? []) as typeof deliveries);
+    setLoading(false);
+  };
+  useEffect(() => {
+    void load();
+  }, []);
   return (
     <section className="page">
       <h2>Configurações</h2>
       <Panel title="Projeto">
-        <p>Configurações operacionais do painel.</p>
+        <p>
+          As configurações sensíveis de e-mail ficam protegidas nos secrets do
+          Supabase e nunca são enviadas ao navegador.
+        </p>
       </Panel>
+      <section className="panel email-diagnostics">
+        <div className="panel-heading">
+          <div>
+            <h3>Diagnóstico de e-mails</h3>
+            <p>Envios pendentes ou que precisam de atenção.</p>
+          </div>
+          <button
+            className="secondary"
+            disabled={loading}
+            onClick={() => void load()}
+          >
+            {loading ? "Atualizando…" : "Atualizar"}
+          </button>
+        </div>
+        {error && (
+          <p className="notice">
+            Não foi possível consultar os envios: {error}
+          </p>
+        )}
+        {!loading && !error && deliveries.length === 0 && (
+          <Empty text="Nenhuma falha ou envio pendente." />
+        )}
+        {deliveries.map((delivery) => (
+          <article className="email-delivery" key={delivery.id}>
+            <div>
+              <strong>
+                {delivery.work_title} #{delivery.chapter_number} ·{" "}
+                {stageLabel[delivery.stage]}
+              </strong>
+              <span>{delivery.recipient_email}</span>
+            </div>
+            <span
+              className={`delivery-status ${delivery.status.toLowerCase()}`}
+            >
+              {delivery.status === "FAILED"
+                ? "Falhou"
+                : delivery.status === "PROCESSING"
+                  ? "Enviando"
+                  : "Pendente"}
+            </span>
+            <small>
+              {delivery.last_error || `Tentativa ${delivery.attempts}`}
+            </small>
+          </article>
+        ))}
+      </section>
     </section>
   );
 }

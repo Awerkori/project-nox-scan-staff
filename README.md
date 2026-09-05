@@ -7,7 +7,7 @@ Painel privado de produção para a staff da Project Nox. O frontend é React + 
 - Login somente com GitHub OAuth, convites por login e reivindicação segura para contas que já fizeram login.
 - Cargos múltiplos, filas automáticas por etapa e workflow RAW → Clean/Tradução paralelos → Type → QC → Pronto.
 - RPCs transacionais para assumir, concluir, reprovar e aprovar tarefas.
-- Notificações persistentes por cargo quando uma fila é liberada; o Realtime atualiza sino e toast para sessões abertas.
+- Notificações persistentes por cargo e avisos por e-mail via outbox, Edge Function e Resend quando uma etapa é liberada.
 - Catálogo editorial separado da produção; o workflow nasce somente quando um Raw Provider assume um item.
 - Arquivos e capas privados, versões reservadas com lock, créditos imutáveis, comentários, atividade, notificações e Realtime.
 - Abstração de storage: Supabase Storage hoje; `TelegramStorageProvider` reservado para uma futura Edge Function/serviço seguro.
@@ -34,7 +34,7 @@ Administradores gerenciam convites, cargos e ativação no painel. O banco imped
 ## Configuração Supabase
 
 1. Crie um projeto Supabase.
-2. Aplique em ordem todas as migrations de [`supabase/migrations`](supabase/migrations). Considere `20260904220000_works_catalog.sql` pendente até ela aparecer no histórico remoto; `20260904230000_production_integrity.sql` depende dela.
+2. Aplique em ordem as migrations ainda pendentes de [`supabase/migrations`](supabase/migrations). `20260904220000_works_catalog.sql` já foi aplicada no ambiente remoto; as posteriores dependem dela.
 3. Em **Authentication → Providers**, habilite GitHub e informe Client ID/secret somente no Supabase.
 4. Configure a callback OAuth indicada pelo Supabase (normalmente `https://<project-ref>.supabase.co/auth/v1/callback`) no GitHub OAuth App.
 5. Em **Authentication → URL Configuration**, adicione `https://awerkori.github.io/project-nox-scan-staff/` e a URL local de desenvolvimento como redirect URLs.
@@ -60,6 +60,26 @@ Os testes em [`src/workflow.test.ts`](src/workflow.test.ts) cobrem a regra centr
 `claim_stage` bloqueia a linha com `FOR UPDATE`, exige o cargo da etapa e só aceita estado `AVAILABLE`. O índice parcial `one_active_assignment_per_stage` é uma segunda barreira: dois cliques simultâneos não podem resultar em dois responsáveis ativos. O perdedor recebe a mensagem de conflito da RPC.
 
 Ao ocorrer uma transição real para `AVAILABLE`, `notify_stage_available` cria uma notificação para todos os membros ativos do cargo correspondente (e administradores). RAW libera Clean e Tradução em paralelo; Clean + Tradução liberam Type; Type libera QC. `release_stage` devolve a tarefa para a fila e notifica o cargo outra vez. Renderizações, reloads e eventos Realtime não criam notificações porque não chamam a função de transição.
+
+### E-mails de produção
+
+A migration `20260904240000_catalog_management_and_email_outbox.sql` cria uma outbox durável, deduplicada por etapa/liberação/destinatário. O webhook assíncrono tenta acordar a Edge Function imediatamente e um cron por minuto recupera falhas. O workflow nunca aguarda o Resend.
+
+Depois de aplicar a migration:
+
+```bash
+supabase functions deploy send-production-emails --no-verify-jwt
+supabase secrets set RESEND_API_KEY=re_... RESEND_FROM="Project Nox <staff@seudominio.com>" EMAIL_WORKER_SECRET=um-segredo-forte STAFF_APP_URL=https://awerkori.github.io/project-nox-scan-staff/
+```
+
+Cadastre no Vault do projeto a URL e o mesmo segredo do worker:
+
+```sql
+select vault.create_secret('https://SEU-PROJETO.supabase.co', 'project_url');
+select vault.create_secret('O-MESMO-EMAIL_WORKER_SECRET', 'email_worker_secret');
+```
+
+`RESEND_API_KEY` e `EMAIL_WORKER_SECRET` existem somente nos secrets da Edge Function/Vault. O remetente precisa usar um domínio verificado no Resend. Falhas e tentativas ficam disponíveis para administradores em `production_email_outbox.last_error` e não alteram o estado do capítulo.
 
 ## Deploy
 
