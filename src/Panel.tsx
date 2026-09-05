@@ -156,7 +156,12 @@ export function PanelRoutes(props: PanelProps) {
         <Route path="works" element={<Works {...props} />} />
         <Route
           path="works/:id"
-          element={<SimpleWorkCatalog member={props.member} />}
+          element={
+            <SimpleWorkCatalog
+              member={props.member}
+              revision={props.chapters}
+            />
+          }
         />
         <Route path="chapters/:id" element={<Chapter {...props} />} />
         <Route path="notifications" element={<Notifications {...props} />} />
@@ -1715,6 +1720,49 @@ function Chapter({ member, refresh, chapters }: PanelProps) {
               )}
             </Panel>
           </details>
+          {member.is_admin &&
+            !chapter.published_at &&
+            chapter.chapter_stages.some(
+              (stage) =>
+                stage.status === "IN_PROGRESS" &&
+                stage.assigned_to !== member.user_id,
+            ) && (
+              <details className="chapter-details">
+                <summary>Gerenciar tarefas da equipe</summary>
+                <Panel title="Devolver uma tarefa à fila">
+                  <p>
+                    Use quando o responsável não puder continuar. Arquivos e
+                    créditos são preservados.
+                  </p>
+                  {chapter.chapter_stages
+                    .filter(
+                      (stage) =>
+                        stage.status === "IN_PROGRESS" &&
+                        stage.assigned_to !== member.user_id,
+                    )
+                    .map((stage) => (
+                      <button
+                        key={stage.id}
+                        className="secondary"
+                        disabled={!!busy}
+                        onClick={() => {
+                          if (
+                            window.confirm(
+                              `Devolver ${stageLabel[stage.stage]} de ${stage.assignee?.display_name || stage.assignee?.github_login || "outro membro"} à fila?`,
+                            )
+                          )
+                            void run("release", async () => {
+                              await releaseStage(stage.id);
+                              notify("Tarefa devolvida à fila.");
+                            });
+                        }}
+                      >
+                        Devolver {stageLabel[stage.stage]} à fila
+                      </button>
+                    ))}
+                </Panel>
+              </details>
+            )}
           <Panel title="Observações">
             <div className="comment-form">
               <textarea

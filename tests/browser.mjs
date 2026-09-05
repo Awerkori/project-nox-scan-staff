@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { chromium, expect } from "@playwright/test";
-import { as, sql, pool, users, workId, stage } from "./database.mjs";
+import { as, sql, pool, users, workId, stage, start } from "./database.mjs";
 
 const server = spawn(
   "npm",
@@ -493,18 +493,14 @@ try {
     .getByRole("button", { name: "Marcar concluídos", exact: true })
     .click();
   await expect(
-    admin
-      .locator(".catalog-row")
-      .filter({
-        has: admin.getByLabel("Selecionar capítulo 1", { exact: true }),
-      }),
+    admin.locator(".catalog-row").filter({
+      has: admin.getByLabel("Selecionar capítulo 1", { exact: true }),
+    }),
   ).toContainText("Concluído");
   await admin.getByRole("button", { name: "Concluído", exact: true }).click();
-  const protectedRow = admin
-    .locator(".catalog-row")
-    .filter({
-      has: admin.getByLabel("Selecionar capítulo 81", { exact: true }),
-    });
+  const protectedRow = admin.locator(".catalog-row").filter({
+    has: admin.getByLabel("Selecionar capítulo 81", { exact: true }),
+  });
   await protectedRow.locator("summary").click();
   await expect(
     protectedRow.getByRole("button", { name: /Protegido/ }),
@@ -548,6 +544,21 @@ try {
     }
   }
   assert.ok(downloads >= 5);
+  const returned = await start(82);
+  await go(admin, `/chapters/${returned.id}`);
+  await admin.getByText("Gerenciar tarefas da equipe", { exact: true }).click();
+  await admin
+    .getByRole("button", { name: "Devolver RAW à fila", exact: true })
+    .click();
+  await expect(
+    admin.getByRole("button", { name: "Devolver RAW à fila", exact: true }),
+  ).toHaveCount(0);
+  assert.equal((await stage(returned, "RAW")).status, "AVAILABLE");
+  await go(raw, "/raw");
+  await raw
+    .getByRole("button", { name: "Pegar capítulo", exact: true })
+    .click();
+  await expect(raw.locator(".mine-section")).toContainText("#82");
   assert.equal((await stage(chapter, "READY")).status, "COMPLETED");
   assert.deepEqual(errors, []);
   console.log(

@@ -42,7 +42,13 @@ export function parseChapterRange(
     : null;
 }
 
-export function SimpleWorkCatalog({ member }: { member: StaffMember }) {
+export function SimpleWorkCatalog({
+  member,
+  revision,
+}: {
+  member: StaffMember;
+  revision?: unknown;
+}) {
   const { id } = useParams();
   const [work, setWork] = useState<Work | null>(null);
   const [chapters, setChapters] = useState<CatalogChapter[]>([]);
@@ -83,7 +89,7 @@ export function SimpleWorkCatalog({ member }: { member: StaffMember }) {
   }, [id]);
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, revision]);
 
   const run = async (key: string, action: () => Promise<void>) => {
     if (busy) return;
