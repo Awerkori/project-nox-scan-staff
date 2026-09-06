@@ -25,11 +25,18 @@ Deno.serve(async (request) => {
         "https://awerkori.github.io/project-nox-scan-staff/",
     };
     const body = await request.json().catch(() => ({}));
+    const { data: settings, error: settingsError } = await admin
+      .from("production_email_settings").select("enabled").eq("id", true).single();
+    if (settingsError) throw settingsError;
+    if (!settings.enabled && body.diagnose !== true && body.test !== true)
+      return Response.json({ enabled: false, processed: 0, sent: 0,
+        reason: "E-mail opcional desativado; notificações internas permanecem ativas" }, { status: 202 });
     if (body.diagnose === true) {
       if (!config.apiKey)
         return Response.json({
           apiKeyConfigured: false,
           fromConfigured: !!config.from,
+          enabled: settings.enabled,
         });
       const response = await fetch("https://api.resend.com/domains", {
         headers: { Authorization: `Bearer ${config.apiKey}` },
@@ -41,6 +48,7 @@ Deno.serve(async (request) => {
         fromConfigured: !!config.from,
         providerStatus: response.status,
         testMode: isTestSender(config.from),
+        enabled: settings.enabled,
         domains: result.data?.map(
           (domain: { name: string; status: string }) => ({
             name: domain.name,

@@ -48,7 +48,12 @@ create function storage.foldername(text) returns text[] language sql immutable a
 create table vault.decrypted_secrets(name text,decrypted_secret text);
 create table net._http_response(id bigint,status_code integer,error_msg text);
 create function net.http_post(url text,headers jsonb,body jsonb,timeout_milliseconds integer) returns bigint language sql as $$ select 1::bigint $$;
-create function cron.schedule(text,text,text) returns bigint language sql as $$ select 1::bigint $$;
+create table cron.job(jobid bigint generated always as identity primary key,jobname text unique,schedule text,command text);
+create function cron.schedule(text,text,text) returns bigint language sql as $$
+  insert into cron.job(jobname,schedule,command) values($1,$2,$3)
+  on conflict(jobname) do update set schedule=excluded.schedule,command=excluded.command returning jobid
+$$;
+create function cron.unschedule(bigint) returns boolean language sql as $$ delete from cron.job where jobid=$1 returning true $$;
 create publication supabase_realtime;
 grant usage on schema public,auth,storage to anon,authenticated,service_role;
 grant all on storage.objects to authenticated,service_role;

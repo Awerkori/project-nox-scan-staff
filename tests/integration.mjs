@@ -22,6 +22,30 @@ async function denied(promise) {
   checks++;
 }
 try {
+  // Default R$0 mode: internal notifications work without any email queue/config.
+  ok(!(await sql("select enabled from production_email_settings")).rows[0].enabled);
+  ok((await sql("select * from cron.job where jobname='nox-production-email-worker'")).rowCount === 0);
+  await denied(as(users.raw, "update production_email_settings set enabled=true"));
+  await denied(as(users.admin, "update production_email_settings set enabled=true"));
+  const internalOnly = await start(80);
+  await finish(internalOnly, "RAW", users.raw);
+  ok((await stage(internalOnly, "CLEAN_REDRAW")).status === "AVAILABLE");
+  ok((await stage(internalOnly, "TRANSLATION")).status === "AVAILABLE");
+  ok((await sql("select * from production_email_outbox")).rowCount === 0);
+  const cleanNotices = await as(users.clean, "select * from notifications where chapter_id=$1 and kind='stage_available'", [internalOnly.id]);
+  ok(cleanNotices.rowCount === 1 && cleanNotices.rows[0].body.includes("Clean / Redraw"));
+  ok((await as(users.translator, "select * from notifications where chapter_id=$1 and kind='stage_available'", [internalOnly.id])).rowCount === 1);
+  ok((await as(users.type, "select * from notifications where chapter_id=$1", [internalOnly.id])).rowCount === 0);
+  ok((await as(users.outsider, "select * from notifications")).rowCount === 0);
+  ok((await as(users.translator, "update notifications set read_at=now() where id=$1", [cleanNotices.rows[0].id])).rowCount === 0);
+  await as(users.clean, "update notifications set read_at=now() where id=$1", [cleanNotices.rows[0].id]);
+  ok((await as(users.clean, "select read_at from notifications where id=$1", [cleanNotices.rows[0].id])).rows[0].read_at !== null);
+  await sql("select dispatch_production_email_worker()");
+  ok((await sql("select * from email_worker_diagnostics")).rowCount === 0);
+  ok((await sql("select * from claim_production_email_jobs(5)")).rowCount === 0);
+  // Optional future email mode remains covered by all existing workflow tests.
+  await sql("update production_email_settings set enabled=true");
+  ok((await sql("select * from cron.job where jobname='nox-production-email-worker'")).rowCount === 1);
   for (const before of [true, false]) {
     const name = `invite_${before}`,
       id = randomUUID();
@@ -278,6 +302,15 @@ try {
     new Set(claimed.flatMap((r) => r.rows.map((j) => j.id))).size ===
       claimed.reduce((n, r) => n + r.rowCount, 0),
   );
+  await sql("update production_email_settings set enabled=false");
+  ok((await sql("select * from production_email_outbox where status in ('PENDING','PROCESSING','FAILED')")).rowCount === 0);
+  ok((await sql("select * from production_email_outbox where status='CANCELLED' and last_error is null")).rowCount > 0);
+  ok((await sql("select * from claim_production_email_jobs(5)")).rowCount === 0);
+  const diagnostics = (await sql("select count(*) from email_worker_diagnostics")).rows[0].count;
+  await sql("select dispatch_production_email_worker()");
+  ok((await sql("select count(*) from email_worker_diagnostics")).rows[0].count === diagnostics);
+  await sql("update production_email_settings set enabled=true");
+  ok((await sql("select * from claim_production_email_jobs(5)")).rowCount === 0);
   // Test last-admin contention with distinct users on distinct connections.
   await sql("update staff_members set is_admin=true where user_id=$1", [
     users.raw,

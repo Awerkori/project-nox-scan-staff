@@ -63,6 +63,10 @@ Ao ocorrer uma transição real para `AVAILABLE`, o banco avisa os membros ativo
 
 ### E-mails de produção
 
+**Estado atual: e-mail opcional desligado, custo R$0.** Notificações internas são o método principal: continuam sendo criadas pelo backend, protegidas por destinatário/cargo e atualizadas no site por Realtime/refetch. Não dependem de domínio, Resend ou e-mail do membro.
+
+As migrations `20260905030000` e `20260905040000` adicionam uma configuração protegida, desativada por padrão. Quando desligada, nenhuma liberação gera outbox; o processamento não reserva envios nem chama o provedor, e o cron de e-mail é removido. Tentativas anteriores são **CANCELLED**, sem erro e sem exclusão do histórico. Não voltam à fila quando o recurso for habilitado. Configurações mostra apenas “E-mail opcional — Desativado”.
+
 A migration `20260904240000_catalog_management_and_email_outbox.sql` cria uma outbox durável, deduplicada por etapa/liberação/destinatário. O webhook assíncrono tenta acordar a Edge Function imediatamente e um cron por minuto recupera falhas. O workflow nunca aguarda o Resend.
 
 Depois de aplicar a migration:
@@ -85,7 +89,7 @@ select vault.create_secret('O-MESMO-EMAIL_WORKER_SECRET', 'email_worker_secret')
 
 `node scripts/email-worker.mjs test` envia uma mensagem sintética para `delivered@resend.dev`, o destinatário oficial de simulação do Resend. Exige o segredo do worker, usa idempotência e não altera a outbox. Um retorno `accepted: true` comprova aceitação pela API, **não recebimento na caixa de uma pessoa**. `diagnose` informa `testMode`; `run` retorna HTTP 202 enquanto o remetente for de teste.
 
-Para habilitar destinatários reais, verifique seu domínio em [Resend → Domains](https://resend.com/domains), cadastrando os registros DNS indicados até aparecer **Verified**. Depois basta trocar o secret `RESEND_FROM` por `Project Nox <staff@seudominio.com>`; não exige mudança no frontend, migration ou novo deploy. A fila retoma somente os avisos ainda elegíveis. O domínio compartilhado de teste [não permite enviar para outros membros](https://resend.com/docs/knowledge-base/403-error-resend-dev-domain).
+Para habilitar destinatários reais **somente se desejado no futuro**, verifique seu domínio em [Resend → Domains](https://resend.com/domains), cadastrando os registros DNS indicados até aparecer **Verified**. Troque o secret `RESEND_FROM` por `Project Nox <staff@seudominio.com>` e execute pelo backend autorizado `update public.production_email_settings set enabled=true where id;`. O cron é recriado automaticamente; apenas novas liberações geram avisos. Não exige frontend novo ou migration. Para desligar novamente, altere `enabled=false`: fila ativa cancelada e cron removido. A configuração não é editável pelo navegador, nem por um membro administrador. O domínio compartilhado de teste [não permite enviar para outros membros](https://resend.com/docs/knowledge-base/403-error-resend-dev-domain).
 
 ## Deploy
 

@@ -20,6 +20,9 @@ for (const table of [
   "staff_members",
   "staff_invites",
   "stage_completions",
+  "notifications",
+  "production_email_settings",
+  "production_email_outbox",
 ]) {
   const response = await fetch(`${url}/rest/v1/${table}?select=*&limit=1`, {
     headers: { apikey: key },

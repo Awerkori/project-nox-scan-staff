@@ -47,6 +47,8 @@ const tables = new Set([
   "notifications",
   "comments",
   "profiles",
+  "production_email_settings",
+  "production_email_outbox",
 ]);
 const ident = (s) => {
   assert.match(s, /^[a-z_][a-z_0-9]*$/);
@@ -257,6 +259,7 @@ async function session(name, route = "/") {
           status: 200,
           headers: {
             "content-range": `0-${result.rowCount - 1}/${result.rowCount}`,
+            "access-control-expose-headers": "content-range",
           },
         });
       const data = result.rows.map((r) => r.data);
@@ -362,6 +365,17 @@ try {
       workId,
     ])
   ).rows[0];
+  await go(clean, "/notifications");
+  const cleanNotice = clean.locator(".notification").filter({ hasText: "Clean / Redraw disponível" });
+  await expect(cleanNotice).toHaveCount(1);
+  await cleanNotice.click();
+  await expect(clean).toHaveURL(new RegExp(`/chapters/${chapter.id}$`));
+  await go(clean, "/notifications");
+  await expect(clean.locator(".notification.unread")).toHaveCount(0);
+  await go(admin, "/admin/settings");
+  await expect(admin.getByText("E-mail opcional", { exact: true })).toBeVisible();
+  await expect(admin.getByText("Diagnóstico de e-mails", { exact: true })).toHaveCount(0);
+  await screenshot(admin, "settings-email-disabled-desktop");
   for (const [page, path] of [
     [clean, "/clean-redraw"],
     [translation, "/translation"],
@@ -512,6 +526,11 @@ try {
       path === "/" ? "home-desktop" : `${path.slice(1)}-desktop`,
     );
   }
+  await admin.getByRole("button", { name: "Marcar todas como lidas" }).click();
+  await expect(admin.locator(".notification.unread")).toHaveCount(0);
+  assert.equal((await as(users.admin, "select * from notifications where read_at is null")).rowCount, 0);
+  assert.equal((await sql("select * from production_email_outbox")).rowCount, 0);
+  assert.equal((await sql("select * from email_worker_diagnostics")).rowCount, 0);
   for (const [width, height, label] of [
     [1280, 720, "notebook"],
     [390, 844, "mobile"],

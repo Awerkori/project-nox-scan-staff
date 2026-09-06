@@ -1896,7 +1896,7 @@ function Notifications({ refresh, notifications }: PanelProps) {
       {error && <Feedback kind="error">{error}</Feedback>}
       <button
         className="secondary"
-        disabled={busy || !notifications}
+        disabled={busy || (!notifications && !items.some((item) => !item.read_at))}
         onClick={() => void run(markAllNotificationsRead)}
       >
         Marcar todas como lidas
@@ -2165,6 +2165,7 @@ function Members() {
   );
 }
 function Settings() {
+  const [emailEnabled, setEmailEnabled] = useState(false);
   const [deliveries, setDeliveries] = useState<
     Array<{
       id: string;
@@ -2183,6 +2184,19 @@ function Settings() {
   const load = async () => {
     setLoading(true);
     setError("");
+    const { data: settings, error: settingsError } = await supabase!
+      .from("production_email_settings").select("enabled").eq("id", true).single();
+    if (settingsError) {
+      setError(messageOf(settingsError));
+      setLoading(false);
+      return;
+    }
+    setEmailEnabled(settings.enabled);
+    if (!settings.enabled) {
+      setDeliveries([]);
+      setLoading(false);
+      return;
+    }
     const { data, error: queryError } = await supabase!
       .from("production_email_outbox")
       .select(
@@ -2201,13 +2215,19 @@ function Settings() {
   return (
     <section className="page">
       <h2>Configurações</h2>
-      <Panel title="Projeto">
+      <Panel title="Avisos da staff">
         <p>
-          As configurações sensíveis de e-mail ficam protegidas nos secrets do
-          Supabase e nunca são enviadas ao navegador.
+          Os avisos chegam aqui na central. Abra Notificações pelo menu ou pelo sino
+          para ver novos trabalhos e atualizações dos seus capítulos.
         </p>
+        <Link className="button secondary" to="/notifications">Abrir notificações</Link>
       </Panel>
-      <section className="panel email-diagnostics">
+      {loading && <Empty text="Carregando…" />}
+      {error && <Feedback kind="error">Não foi possível carregar as configurações. Tente novamente.</Feedback>}
+      {!loading && !error && !emailEnabled && <Panel title="E-mail opcional">
+        <p>Desativado. Você não precisa de e-mail para trabalhar: os avisos continuam chegando aqui no site.</p>
+      </Panel>}
+      {emailEnabled && <section className="panel email-diagnostics">
         <div className="panel-heading">
           <div>
             <h3>Diagnóstico de e-mails</h3>
@@ -2252,7 +2272,7 @@ function Settings() {
             </small>
           </article>
         ))}
-      </section>
+      </section>}
     </section>
   );
 }
