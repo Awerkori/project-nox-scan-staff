@@ -26,8 +26,8 @@ try {
   const login = checked(await staff.auth.verifyOtp({ token_hash: link.properties.hashed_token, type: "magiclink" }));
   assert.equal(login.user.id, owner);
   work = checked(await staff.from("works").insert({ title, synopsis: "Validação de interface. Removida ao terminar este teste." }).select("id").single());
-  checked(await staff.rpc("add_catalog_chapter_range", { p_work_id: work.id, p_start: 1, p_end: 1 }));
-  const catalog = checked(await staff.from("work_chapter_catalog").select("id").eq("work_id", work.id).single());
+  checked(await staff.rpc("add_catalog_chapter_range", { p_work_id: work.id, p_start: 1, p_end: 117 }));
+  const catalog = checked(await staff.from("work_chapter_catalog").select("id").eq("work_id", work.id).eq("number", 1).single());
   chapter = checked(await staff.rpc("start_catalog_production", { p_catalog_id: catalog.id }));
   const raw = checked(await staff.from("chapter_stages").select("id").eq("chapter_id", chapter.id).eq("stage", "RAW").single());
   browser = await chromium.launch({ headless: true });
@@ -49,7 +49,20 @@ try {
       if (route === `works/${work.id}`) {
         await expect(page.getByLabel("Título", { exact: true })).toHaveValue(title);
         await expect(page.getByRole("textbox", { name: "Sinopse", exact: true })).toHaveValue("Validação de interface. Removida ao terminar este teste.");
+        await expect(page.locator(".catalog-row strong").first()).toHaveText("#117");
+        await page.getByLabel("Ordenação dos capítulos").selectOption("asc");
+        await expect(page.locator(".catalog-row strong").first()).toHaveText("#1");
+        await page.getByLabel("Ordenação dos capítulos").selectOption("desc");
       }
+      if (route === "") await expect(page.locator(".home-progress").first()).toContainText("RAW");
+      await expect(page.locator(".brand-icon")).toHaveAttribute("src", /nox-icon.png$/);
+      if (route === "published" && await page.locator(".publication-card").count()) {
+        await page.locator(".publication-card").first().getByRole("button", { name: /Opções administrativas/ }).click();
+        await expect(page.locator(".context-panel:popover-open")).toHaveCSS("background-color", "rgb(27, 20, 38)");
+        await page.screenshot({ path: `test-results/live-solid-menu-${label}.png`, fullPage: true });
+        await page.keyboard.press("Escape");
+      }
+      for (const img of await page.locator(".cover > img,.cover-editor > img").all()) await expect(img).toHaveCSS("object-fit", "contain");
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `Overflow ${label}/${route}`);
       await page.screenshot({ path: `test-results/live-${label}-${route.replaceAll("/", "-") || "home"}.png`, fullPage: true });
     }
@@ -85,12 +98,30 @@ try {
   await expect(page.locator(".chapter-state")).toHaveText("Produção cancelada");
   assert.equal(checked(await staff.from("work_chapter_catalog").select("status").eq("id", catalog.id).single()).status, "TODO");
   assert.equal(checked(await staff.from("notifications").select("id").eq("chapter_id", chapter.id)).length, 0);
-  await page.getByRole("button", { name: "Excluir capítulo", exact: true }).click();
-  await expect(page.getByRole("dialog").getByRole("button", { name: "Excluir capítulo" })).toBeDisabled();
-  await page.getByLabel("Confirmação da exclusão").fill(`${title} #1`);
-  await page.getByRole("dialog").getByRole("button", { name: "Excluir capítulo", exact: true }).click();
-  await page.waitForURL("**/#/works");
+  await page.goto(`${site}#/works`, { waitUntil: "networkidle" });
+  const card = page.locator(".work-card").filter({ hasText: title });
+  await card.getByRole("button", { name: /Administrar obra/ }).click();
+  await card.getByRole("button", { name: "Arquivar obra" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Arquivar obra" }).click();
+  await expect(card).toContainText("Pausada");
+  await card.getByRole("button", { name: /Administrar obra/ }).click();
+  await card.getByRole("button", { name: "Excluir obra", exact: true }).click();
+  await expect(page.getByRole("dialog").getByRole("button", { name: "Excluir obra" })).toBeDisabled();
+  await page.getByLabel("Confirmação da exclusão").fill(title);
+  await page.getByRole("dialog").getByRole("button", { name: "Excluir obra", exact: true }).click();
+  await expect(card).toHaveCount(0);
   assert.equal(checked(await staff.from("chapters").select("id").eq("id", chapter.id)).length, 0);
+  assert.equal(checked(await staff.from("work_chapter_catalog").select("id").eq("work_id", work.id)).length, 0);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  assert.equal(await page.evaluate(() => window.getComputedStyle(document.querySelector(".cosmic-background i")).animationName), "none");
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  const cdp = await context.newCDPSession(page);
+  await cdp.send("Performance.enable");
+  const before = await cdp.send("Performance.getMetrics");
+  const fps = await page.evaluate(() => new Promise(resolve => { const times=[]; const tick=t=>{ times.push(t); if(times.length<90) window.requestAnimationFrame(tick); else resolve(1000*(times.length-1)/(t-times[0])); }; window.requestAnimationFrame(tick); }));
+  const after = await cdp.send("Performance.getMetrics");
+  const delta = after.metrics.find(m=>m.name==="TaskDuration").value - before.metrics.find(m=>m.name==="TaskDuration").value;
+  console.log(`Production animation sample: ${fps.toFixed(1)} FPS; main-thread tasks ${Math.round(delta*1000)} ms during 90 frames. CSS transform layers; no app animation loop.`);
   assert.deepEqual(errors, []);
   console.log("PASS: real deployed UI — release, assignment, reopen, cancel, pending-notification cleanup, typed deletion and clean console. No existing staff work modified.");
 } finally {
@@ -99,6 +130,6 @@ try {
     const remaining = checked(await staff.from("chapters").select("id").eq("id", chapter.id).maybeSingle());
     if (remaining) checked(await staff.rpc("admin_delete_chapter", { p_chapter_id: chapter.id, p_confirmation: `${title} #1` }));
   }
-  if (work) checked(await staff.from("works").delete().eq("id", work.id).eq("title", title));
+  if (work && checked(await staff.from("works").select("id").eq("id", work.id).maybeSingle())) checked(await staff.rpc("admin_delete_work", { p_work_id: work.id, p_confirmation: title }));
   console.log("Temporary validation work cleaned up; no stored files were created or removed.");
 }

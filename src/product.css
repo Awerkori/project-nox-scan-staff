@@ -110,3 +110,47 @@
   .notification-actions { width: 100%; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; scroll-behavior: auto !important; } }
+
+/* Shared solid contextual menus, in the browser's top layer. */
+.chapter-menu > button { display: grid; place-items: center; width: 42px; height: 42px; padding: 0; font-size: 1.4rem; color: #eadff7; background: #241c32; border: 1px solid #594469; border-radius: 11px; }
+.chapter-menu > button:hover { background: #3b2850; border-color: #a282cf; }
+.chapter-menu > .context-panel { position: fixed; inset: auto; margin: 0; padding: 8px; max-width: calc(100vw - 24px); max-height: calc(100dvh - 24px); overflow-y: auto; box-sizing: border-box; z-index: 1000; background: #1b1426; color: #eee5f9; border: 1px solid #70548b; border-radius: 14px; box-shadow: 0 18px 60px #000c, 0 0 0 1px #09070e; opacity: 1; backdrop-filter: none; }
+.context-panel:not(:popover-open) { display: none; }
+.context-panel:popover-open { display: grid; gap: 3px; }
+.chapter-menu > .context-panel > :is(button,a) { display: flex; align-items: center; min-height: 44px; width: 100%; box-sizing: border-box; padding: 11px 13px; text-decoration: none; text-align: left; font-size: .86rem; font-weight: 550; border: 0; border-radius: 8px; color: #e9ddf4; background: #1b1426; }
+.chapter-menu > .context-panel > :is(button,a):hover { background: #3b2850; color: white; }
+.chapter-menu > .context-panel > .danger { color: #ffb1c0; }
+.chapter-menu > .context-panel > button:disabled { color: #898091; background: #1b1426; cursor: not-allowed; }
+:is(button,a,input,textarea,select,summary):focus-visible { outline: 2px solid #c09aee; outline-offset: 3px; }
+.work-card-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.work-card-heading .feedback { flex-basis: 100%; }
+.catalog-sort { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: .8rem; }
+.catalog-sort select { min-height: 40px; padding: 8px 12px; }
+.catalog-page .page-heading > .chapter-menu { float: right; margin-top: -48px; }
+.home-progress { display: grid; gap: 9px; margin: 12px 0; }
+.dashboard-grid .chapter { display: block; }
+.dashboard-grid .chapter > strong { display: block; line-height: 1.5; }
+.dashboard-grid .chapter > span { display: inline-block; margin-top: 5px; color: #cbb1ed; }
+.chapter-menu > .context-panel > :is(button,a) { justify-content: flex-start; }
+.home-stage { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: .78rem; border-left: 2px solid #65537c; padding-left: 10px; }
+.home-stage b { color: #cbb1ed; text-transform: uppercase; letter-spacing: .035em; }
+.home-stage span { color: #c4b9d0; }
+.home-stage small { grid-column: 1 / -1; color: #eee6f6; }
+.home-stage.in_progress { border-color: #d4b561; }
+.cover { height: auto; aspect-ratio: 2 / 3; max-height: 360px; background: radial-gradient(ellipse at center,#30203f,#100c18 75%); }
+.cover img, .cover-editor > img { object-fit: contain; object-position: center; background: #100c18; }
+.cover-editor > img, .cover-editor > span { height: auto; aspect-ratio: 2 / 3; min-height: 0; }
+.brand .brand-icon { width: 46px; height: 46px; object-fit: contain; flex-shrink: 0; }
+.brand h1 { color: #bc92ed; }
+.brand small { color: #e0bf62; }
+.cover-placeholder .placeholder-icon { width: 76px; height: 76px; object-fit: contain; background: transparent; }
+
+/* Twelve tiny composited points, six on mobile. No full-screen moving texture. */
+#root { position: relative; z-index: 1; }
+.app { background: transparent; }
+.cosmic-background { position: fixed; inset: 0; overflow: hidden; pointer-events: none; z-index: 0; background: radial-gradient(ellipse at 75% 15%,#652b9115,transparent 55%),radial-gradient(ellipse at 20% 85%,#522d8112,transparent 55%); }
+.cosmic-background i { position: absolute; top: -4px; left: var(--x); width: 2px; height: 2px; border-radius: 50%; background: #c4a3e2; opacity: .3; animation: nox-starlight 54s var(--delay) linear infinite; will-change: transform; }
+.cosmic-background i:nth-child(even) { width: 1px; height: 1px; animation-duration: 68s; opacity: .24; }
+@keyframes nox-starlight { to { transform: translate3d(0,calc(100dvh + 8px),0); } }
+@media (max-width: 600px) { .cosmic-background i:nth-child(even) { display: none; } .catalog-sort { width: 100%; justify-content: space-between; } .cover { max-height: 340px; } }
+@media (prefers-reduced-motion: reduce) { .cosmic-background i { animation: none; will-change: auto; top: calc(50% + var(--x) / 3); } }

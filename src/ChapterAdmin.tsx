@@ -4,6 +4,7 @@ import { supabase } from "./lib/supabase";
 import { messageOf } from "./lib/errors";
 import { orderedStages, stageLabel, stageRole } from "./workflow";
 import { useConfirmation } from "./ConfirmDialog";
+import { ContextMenu } from "./ContextMenu";
 import type { Chapter, Role } from "./types";
 
 export async function adminOperation(name: string, args: Record<string, unknown>) {
@@ -42,7 +43,7 @@ export function AdminChapterActions({ chapter, onChanged, onDeleted, compact = f
     <button className="danger" disabled={!!busy} onClick={() => void run("delete")}>{busy === "delete" ? "Excluindo…" : "Excluir capítulo"}</button>
   </>;
   return <>
-    {compact ? <details className="chapter-menu admin-menu"><summary aria-label={`Opções administrativas de ${label}`}>⋯</summary><div>{actions}</div></details> : <div className="admin-danger-actions">{actions}</div>}
+    {compact ? <ContextMenu label={`Opções administrativas de ${label}`}>{actions}</ContextMenu> : <div className="admin-danger-actions">{actions}</div>}
     {feedback && <p className="feedback success" role="status">{feedback}</p>}{error && <p className="feedback error" role="alert">{error}</p>}{dialog}
   </>;
 }

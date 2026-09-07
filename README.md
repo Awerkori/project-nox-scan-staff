@@ -99,6 +99,16 @@ O app usa `HashRouter`, portanto URLs do Pages não sofrem 404 em rotas internas
 
 ## Validação da revisão de UX
 
+### Polimento visual e exclusão de obras
+
+O ícone oficial foi convertido para PNGs de 192 e 48 px com transparência, a partir de `Downloads/nox icone site.png`; o original não foi modificado. Capas usam `contain`. O fundo usa 12 pontos CSS minúsculos (6 em telas pequenas), sem textura móvel de tela inteira, vídeos, canvas ou loop JavaScript; respeita movimento reduzido. Menus usam popovers nativos na camada superior do navegador e fecham por Escape/clique externo.
+
+O catálogo ordena todos os capítulos carregados antes de paginar, decrescente por padrão. Na Home, as etapas paralelas aparecem juntas com estado e responsável; capítulos publicados continuam fora da lista.
+
+A migration incremental `20260907200000_work_deletion.sql` oferece `admin_delete_work`, exige admin ativo e o título exato como confirmação. Exclui catálogo e produção associada, mas **nunca apaga arquivos externos**. Referências de capas, artifacts e partes ficam preservadas em `work_deletion_audit`, acessível somente pelo backend autorizado; a interface não recebe referências privadas do Telegram. DELETE direto de obras pelo navegador foi bloqueado para evitar contornar a confirmação e a auditoria. Arquivar usa o estado existente “Pausada”, sem alterar o workflow de capítulos já iniciados.
+
+`tests/remote-work-deletion.sql` verifica a nova operação em transação revertida. O teste publicado usa apenas uma obra temporária própria; a obra `TESTE TÉCNICO — Telegram Storage` não é apagada automaticamente.
+
 ### Administração e pendências
 
 A migration `20260907010000_admin_controls_and_pending_notifications.sql` acrescenta ferramentas administrativas protegidas no banco. **Cancelar produção** devolve o catálogo a “A fazer” e preserva arquivos, versões, créditos e histórico. Reiniciar reutiliza o mesmo capítulo, exigindo um novo envio. **Reabrir etapa** invalida somente a etapa e suas dependências; **despublicar** devolve para “Pra upar”. Reatribuir exige um membro ativo com o cargo correto.

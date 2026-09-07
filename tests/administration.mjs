@@ -1,6 +1,6 @@
 // Real isolated PostgreSQL, including RLS and concurrent admin/member operations.
 import assert from "node:assert/strict";
-import { as, sql, pool, users, start, stage, finish, upload, database } from "./database.mjs";
+import { as, sql, pool, users, start, stage, finish, upload, database, workId } from "./database.mjs";
 let checks = 0;
 const ok = value => { assert.ok(value); checks++; };
 const denied = async action => { await assert.rejects(action); checks++; };
@@ -114,5 +114,20 @@ try {
   await denied(as(users.admin, "select admin_delete_catalog_chapters(array[$1::uuid],'')", [bulk.catalog_id]));
   ok((await as(users.admin, "select admin_delete_catalog_chapters(array[$1::uuid,$2::uuid],'EXCLUIR') count", [bulk.catalog_id, raceChapter.catalog_id])).rows[0].count === 2);
   ok((await sql("select id from chapters where id=any($1::uuid[])", [[bulk.id,raceChapter.id]])).rowCount === 0);
-  console.log(`PASS: ${checks} admin/inbox assertions with real PostgreSQL, RLS, cancellation, reassignments, reopen dependencies, deletion, publication and races (${database}).`);
+  const retained = await upload(await start(99), "RAW", users.raw);
+  await denied(as(users.raw, "select admin_delete_work($1,'Distant Sky')", [workId]));
+  await denied(as(users.outsider, "select admin_delete_work($1,'Distant Sky')", [workId]));
+  await denied(as(users.admin, "select admin_delete_work($1,'wrong title')", [workId]));
+  await denied(as(users.admin, "delete from works where id=$1", [workId]));
+  await as(users.admin, "select admin_delete_work($1,'Distant Sky')", [workId]);
+  ok((await sql("select * from works where id=$1", [workId])).rowCount === 0);
+  ok((await sql("select * from chapters where work_id=$1", [workId])).rowCount === 0);
+  ok((await sql("select * from work_chapter_catalog where work_id=$1", [workId])).rowCount === 0);
+  ok((await sql("select * from artifacts where id=$1", [retained.id])).rowCount === 0);
+  const audit = (await sql("select retained_file_references from work_deletion_audit where work_id=$1", [workId])).rows[0].retained_file_references;
+  ok(audit.artifacts.some(a => a.id === retained.id && a.provider_key === retained.provider_key));
+  ok((await sql("select * from storage.objects where name=$1", [retained.provider_key])).rowCount === 1);
+  await denied(as(users.raw, "select * from work_deletion_audit"));
+  await denied(as(users.admin, "select * from work_deletion_audit"));
+  console.log(`PASS: ${checks} admin/inbox/work-deletion assertions with real PostgreSQL, RLS, preserved storage references and races (${database}).`);
 } finally { await pool.end(); }

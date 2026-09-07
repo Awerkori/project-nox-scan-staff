@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { supabase } from "./lib/supabase";
 import type { CatalogStatus, StaffMember } from "./types";
 import { AdminChapterActions, adminOperation } from "./ChapterAdmin";
 import { useConfirmation } from "./ConfirmDialog";
 import { messageOf } from "./lib/errors";
+import { ContextMenu } from "./ContextMenu";
+import { WorkActions } from "./WorkActions";
 
 type Work = {
   id: string;
@@ -64,6 +66,8 @@ export function SimpleWorkCatalog({
   const [busy, setBusy] = useState("");
   const [feedback, setFeedback] = useState("");
   const [page, setPage] = useState(0);
+  const [ascending, setAscending] = useState(false);
+  const navigate = useNavigate();
   const { confirm, dialog } = useConfirmation();
 
   const load = useCallback(async () => {
@@ -160,8 +164,8 @@ export function SimpleWorkCatalog({
     () =>
       chapters.filter(
         (chapter) => filter === "ALL" || chapter.status === filter,
-      ),
-    [chapters, filter],
+      ).sort((a,b) => ascending ? a.number-b.number : b.number-a.number),
+    [chapters, filter, ascending],
   );
   const pageCount = Math.max(1, Math.ceil(visible.length / 30));
   const currentPage = Math.min(page, pageCount - 1);
@@ -190,6 +194,7 @@ export function SimpleWorkCatalog({
         </Link>
         <p className="eyebrow">CATÁLOGO DA OBRA</p>
         <h2>{work.title}</h2>
+        {member.is_admin && <WorkActions work={work} refresh={() => void load()} onDeleted={() => navigate("/works")} />}
         <p>{work.synopsis || "Sem sinopse cadastrada."}</p>
       </div>
       <div className="stats">
@@ -286,6 +291,7 @@ export function SimpleWorkCatalog({
             <p>{visible.length} exibido(s)</p>
           </div>
           <div className="filters">
+            <label className="catalog-sort"><span>Ordenação</span><select aria-label="Ordenação dos capítulos" value={ascending ? "asc" : "desc"} onChange={event => { setAscending(event.target.value === "asc"); setPage(0); }}><option value="desc">Mais recente primeiro</option><option value="asc">Mais antigo primeiro</option></select></label>
             {(["ALL", "TODO", "IN_PRODUCTION", "COMPLETED"] as const).map(
               (value) => (
                 <button
@@ -386,11 +392,7 @@ export function SimpleWorkCatalog({
                 extraActions={<><button disabled={!!busy || !chapter.production[0].cancelled_at} onClick={() => void updateStatus([chapter.id], "TODO")}>Marcar como A fazer</button><button disabled={!!busy || !chapter.production[0].cancelled_at} onClick={() => void updateStatus([chapter.id], "COMPLETED")}>Marcar como concluído</button></>}
               />}
               {member.is_admin && !chapter.production[0] && (
-                <details className="chapter-menu">
-                  <summary aria-label={`Ações do capítulo ${chapter.number}`}>
-                    ⋯
-                  </summary>
-                  <div>
+                <ContextMenu label={`Ações do capítulo ${chapter.number}`}>
                     <button
                       disabled={!!busy || chapter.production.length > 0}
                       onClick={() => void updateStatus([chapter.id], "TODO")}
@@ -412,8 +414,7 @@ export function SimpleWorkCatalog({
                     >
                       Excluir capítulo
                     </button>
-                  </div>
-                </details>
+                </ContextMenu>
               )}
             </article>
           ))}

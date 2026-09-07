@@ -491,10 +491,18 @@ try {
     "Uma cidade em silêncio.",
   );
   await screenshot(admin, "catalog-desktop");
+  await expect(admin.locator(".catalog-row strong").first()).toHaveText("#117");
+  await admin.getByLabel("Selecionar capítulo 117", { exact: true }).check();
+  await admin.getByLabel("Ordenação dos capítulos").selectOption("asc");
+  await expect(admin.locator(".catalog-row strong").first()).toHaveText("#1");
+  await expect(admin.locator(".bulk-bar")).toContainText("1 selecionado");
+  await admin.getByRole("button", { name: "Cancelar seleção" }).click();
   await admin.getByLabel("Título", { exact: true }).fill("Distant Sky — teste");
   await admin.getByRole("button", { name: "Salvar informações" }).click();
   await expect(admin.getByRole("status")).toContainText("salvas");
   await admin.reload();
+  await expect(admin.locator(".catalog-row strong").first()).toHaveText("#117");
+  await admin.getByLabel("Ordenação dos capítulos").selectOption("asc");
   await expect(admin.getByLabel("Título", { exact: true })).toHaveValue(
     "Distant Sky — teste",
   );
@@ -522,7 +530,7 @@ try {
   const protectedRow = admin.locator(".catalog-row").filter({
     has: admin.getByLabel("Selecionar capítulo 81", { exact: true }),
   });
-  await protectedRow.locator("summary").click();
+  await protectedRow.getByRole("button", { name: /Opções administrativas/ }).click();
   await expect(
     protectedRow.getByRole("button", { name: "Excluir capítulo", exact: true }),
   ).toBeEnabled();
@@ -617,7 +625,11 @@ try {
   await admin.getByRole("button", { name: "A fazer", exact: true }).click();
   await go(admin, "/published");
   const publishedCard = admin.locator(".publication-card").filter({ hasText: "#81" });
-  await publishedCard.locator("summary").click();
+  await publishedCard.getByRole("button", { name: /Opções administrativas/ }).click();
+  await expect(admin.locator(".context-panel:popover-open")).toHaveCSS("background-color", "rgb(27, 20, 38)");
+  await expect(admin.locator(".context-panel:popover-open")).toHaveCSS("position", "fixed");
+  await expect.poll(async () => (await admin.locator(".context-panel:popover-open").boundingBox())?.x).toBeGreaterThan(800);
+  await admin.screenshot({ path: "test-results/published-solid-menu.png", fullPage: true });
   await publishedCard.getByRole("button", { name: "Despublicar", exact: true }).click();
   await admin.getByRole("dialog").getByRole("button", { name: "Despublicar", exact: true }).click();
   await expect(publishedCard).toHaveCount(0);
@@ -656,6 +668,30 @@ try {
   await admin.getByRole("dialog").getByRole("button", { name: "Cancelar convite", exact: true }).click();
   await expect(admin.getByText("@new-member", { exact: true })).toHaveCount(0);
   assert.equal((await stage(chapter, "READY")).status, "WAITING");
+  await go(admin, "/");
+  await expect(admin.locator(".home-progress")).not.toHaveCount(0);
+  await expect(admin.locator(".brand-icon")).toBeVisible();
+  await expect(admin.locator(".brand h1")).toHaveCSS("color", "rgb(188, 146, 237)");
+  await admin.emulateMedia({ reducedMotion: "reduce" });
+  assert.equal(await admin.evaluate(() => window.getComputedStyle(document.querySelector(".cosmic-background i")).animationName), "none");
+  await admin.emulateMedia({ reducedMotion: "no-preference" });
+  assert.equal(await admin.evaluate(() => window.getComputedStyle(document.querySelector(".cosmic-background i")).animationName), "nox-starlight");
+  const frames = await admin.evaluate(() => new Promise(resolve => { const stamps=[]; const frame=t=>{ stamps.push(t); if(stamps.length<90) window.requestAnimationFrame(frame); else resolve(1000*(stamps.length-1)/(t-stamps[0])); }; window.requestAnimationFrame(frame); }));
+  console.log(`Animation benchmark: ${frames.toFixed(1)} FPS (headless browser; twelve tiny CSS points, no application animation loop).`);
+  await screenshot(admin, "home-current-stages");
+  await go(admin, "/works");
+  const workCard = admin.locator(".work-card").filter({ hasText: "Distant Sky — teste" });
+  await workCard.getByRole("button", { name: /Administrar obra/ }).click();
+  await workCard.getByRole("button", { name: "Arquivar obra" }).click();
+  await admin.getByRole("dialog").getByRole("button", { name: "Arquivar obra" }).click();
+  await expect(workCard).toContainText("Pausada");
+  await workCard.getByRole("button", { name: /Administrar obra/ }).click();
+  await workCard.getByRole("button", { name: "Excluir obra", exact: true }).click();
+  await expect(admin.getByRole("dialog").getByRole("button", { name: "Excluir obra" })).toBeDisabled();
+  await admin.getByLabel("Confirmação da exclusão").fill("Distant Sky — teste");
+  await admin.getByRole("dialog").getByRole("button", { name: "Excluir obra" }).click();
+  await expect(workCard).toHaveCount(0);
+  assert.equal((await sql("select * from works where id=$1", [workId])).rowCount, 0);
   assert.deepEqual(errors, []);
   console.log(
     "PASS: Browser production cycle, all three QC returns, publication, roles/manual URL, saved catalog fields, downloads, desktop/notebook/mobile. OAuth/blob envelope is local; database permissions and transitions are real.",

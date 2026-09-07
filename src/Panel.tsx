@@ -34,6 +34,8 @@ import { fetchChapters } from "./lib/chapters";
 import { SimpleWorkCatalog } from "./WorkCatalog";
 import { AdminChapterActions, ChapterAdmin } from "./ChapterAdmin";
 import { useConfirmation } from "./ConfirmDialog";
+import { WorkActions } from "./WorkActions";
+import { currentChapterStages } from "./lib/chapterProgress";
 import { messageOf } from "./lib/errors";
 import { orderedStages, stageLabel, stageRole } from "./workflow";
 import type {
@@ -228,7 +230,7 @@ function Shell({ member, notifications, toast, error, logout }: PanelProps) {
           className={`sidebar${menuOpen ? " open" : ""}`}
         >
           <div className="brand">
-            <b>N</b>
+            <img className="brand-icon" src={`${import.meta.env.BASE_URL}nox-icon.png`} alt="" />
             <h1>
               Project Nox <small>Scan Staff</small>
             </h1>
@@ -331,10 +333,7 @@ function Home(props: PanelProps) {
   );
   const ongoing = props.chapters.filter(
     (chapter) =>
-      !chapter.published_at &&
-      !chapter.chapter_stages.some(
-        (stage) => stage.stage === "READY" && stage.status === "COMPLETED",
-      ),
+      !chapter.published_at && !chapter.cancelled_at,
   );
   return (
     <section className="page">
@@ -398,6 +397,13 @@ function Home(props: PanelProps) {
                 <strong>
                   {chapter.work?.title} #{chapter.number}
                 </strong>
+                <div className="home-progress">
+                  {currentChapterStages(chapter.chapter_stages).map(stage => <div key={stage.id} className={`home-stage ${stage.status.toLowerCase()}`}>
+                    <b>{stage.stage === "CLEAN_REDRAW" ? "Clean" : stageLabel[stage.stage]}</b>
+                    <span>{stage.stage === "READY" && stage.status === "COMPLETED" ? "Aguardando publicação" : stage.status === "IN_PROGRESS" ? "Em andamento" : stage.status === "AVAILABLE" ? "Disponível" : stage.status === "REJECTED" ? "Precisa de correção" : stage.status === "COMPLETED" ? "Concluído" : "Aguardando"}</span>
+                    {stage.assignee && <small>{stage.assignee.display_name || stage.assignee.github_login}</small>}
+                  </div>)}
+                </div>
                 <span>Ver capítulo →</span>
               </Link>
             ))
@@ -1263,6 +1269,7 @@ type WorkRow = {
 };
 function Works({ member }: PanelProps) {
   const [busy, setBusy] = useState(false);
+  const [feedback, setFeedback] = useState("");
   const [works, setWorks] = useState<WorkRow[]>([]);
   const [title, setTitle] = useState("");
   const [synopsis, setSynopsis] = useState("");
@@ -1307,6 +1314,7 @@ function Works({ member }: PanelProps) {
         <h2>Obras</h2>
         <p>Encontre uma obra e veja quais capítulos faltam.</p>
       </div>
+      {feedback && <Feedback kind="success">{feedback}</Feedback>}
       {member.is_admin && (
         <details className="create-box">
           <summary>＋ Nova obra</summary>
@@ -1351,7 +1359,7 @@ function Works({ member }: PanelProps) {
             <article className="work-card" key={work.id}>
               <Cover path={work.cover_path} title={work.title} />
               <div className="work-card-body">
-                <span className="badge">{labelWork(work.status)}</span>
+                <div className="work-card-heading"><span className="badge">{labelWork(work.status)}</span>{member.is_admin && <WorkActions work={work} refresh={load} onDeleted={() => { setFeedback("Obra excluída. Arquivos externos preservados."); load(); }} />}</div>
                 <h3>{work.title}</h3>
                 {work.aliases.length > 0 && (
                   <small>{work.aliases.join(" · ")}</small>
@@ -2269,7 +2277,7 @@ function Cover({ path, title }: { path: string | null; title: string }) {
         <img src={url} alt={`Capa de ${title}`} />
       ) : (
         <div className="cover-placeholder">
-          <b>N</b>
+          <img className="placeholder-icon" src={`${import.meta.env.BASE_URL}nox-icon.png`} alt="" />
           <span>PROJECT NOX</span>
         </div>
       )}
