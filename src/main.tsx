@@ -18,6 +18,7 @@ import type { Chapter, Role, StaffMember } from "./types";
 import "@fontsource-variable/dm-sans";
 import "@fontsource/marcellus/400.css";
 import "./styles.css";
+import "./product.css";
 
 type AuthStatus =
   | "checking-session"

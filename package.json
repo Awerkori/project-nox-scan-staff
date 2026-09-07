@@ -10,6 +10,7 @@
     "test": "vitest run",
     "test:db": "node tests/integration.mjs",
     "test:telegram": "node tests/telegram.mjs",
+    "test:admin": "node tests/administration.mjs",
     "test:browser": "node tests/browser.mjs"
   },
   "dependencies": {

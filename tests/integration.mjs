@@ -99,7 +99,6 @@ try {
     "notify_stage_available",
     "initialize_chapter_stages",
     "create_chapter_range",
-    "admin_assign_stage",
   ]) {
     ok(
       !(

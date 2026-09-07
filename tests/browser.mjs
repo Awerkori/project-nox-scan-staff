@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { chromium, expect } from "@playwright/test";
-import { as, sql, pool, users, workId, stage, start } from "./database.mjs";
+import { as, sql, pool, users, workId, stage, start, finish } from "./database.mjs";
 
 const server = spawn(
   "npm",
@@ -56,13 +56,13 @@ const ident = (s) => {
 };
 const relations = {
   staff_members:
-    ", 'user_roles',coalesce((select jsonb_agg(jsonb_build_object('roles',jsonb_build_object('code',r.role_code))) from user_roles r where r.user_id=t.user_id),'[]')",
+    ", 'user_roles',coalesce((select jsonb_agg(jsonb_build_object('role_code',r.role_code,'roles',jsonb_build_object('code',r.role_code))) from user_roles r where r.user_id=t.user_id),'[]')",
   chapters:
     ", 'work',(select to_jsonb(w) from works w where w.id=t.work_id), 'chapter_stages',coalesce((select jsonb_agg(to_jsonb(s)||jsonb_build_object('assignee',(select to_jsonb(p) from profiles p where p.id=s.assigned_to)) order by s.stage) from chapter_stages s where s.chapter_id=t.id),'[]')",
   chapter_stages:
     ", 'assignee',(select to_jsonb(p) from profiles p where p.id=t.assigned_to)",
   work_chapter_catalog:
-    ", 'production',coalesce((select jsonb_agg(jsonb_build_object('id',c.id)) from chapters c where c.catalog_id=t.id),'[]')",
+    ", 'production',coalesce((select jsonb_agg(jsonb_build_object('id',c.id,'cancelled_at',c.cancelled_at,'published_at',c.published_at)) from chapters c where c.catalog_id=t.id),'[]')",
   stage_completions:
     ", 'user',(select to_jsonb(p) from profiles p where p.id=t.user_id)",
   artifacts:
@@ -219,6 +219,10 @@ async function session(name, route = "/") {
         await as(uid, `update ${ident(table)} t set ${set}${filter}`, args);
         return json(null);
       }
+      if (method === "DELETE") {
+        await as(uid, `delete from ${ident(table)} t${filter}`, args);
+        return json(null);
+      }
       if (method === "POST") {
         const body = req.postDataJSON();
         assert.ok(!Array.isArray(body));
@@ -297,12 +301,15 @@ async function uploadAndFinish(page, label) {
   await expect(
     page.getByRole("button", { name: /Arquivo enviado/ }),
   ).toBeVisible();
+  await expect(page.locator(".complete-action.action-ready")).toBeEnabled();
+  await screenshot(page, `complete-${label.toLowerCase()}-ready`);
   await page
     .getByRole("button", { name: new RegExp(`Concluir ${label}`) })
     .click();
   await expect(page.locator(".mine-section .work-card-action")).toHaveCount(0);
 }
 async function screenshot(page, name) {
+  await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({ path: `test-results/${name}.png`, fullPage: true });
   assert.ok(
     await page.evaluate(
@@ -368,7 +375,7 @@ try {
   await go(clean, "/notifications");
   const cleanNotice = clean.locator(".notification").filter({ hasText: "Clean / Redraw disponível" });
   await expect(cleanNotice).toHaveCount(1);
-  await cleanNotice.click();
+  await cleanNotice.getByRole("button", { name: "Abrir capítulo" }).click();
   await expect(clean).toHaveURL(new RegExp(`/chapters/${chapter.id}$`));
   await go(clean, "/notifications");
   await expect(clean.locator(".notification.unread")).toHaveCount(0);
@@ -409,8 +416,8 @@ try {
     await expect(
       type.getByRole("button", { name: /Baixar Tradução/ }),
     ).toBeVisible();
-    await expect(type.locator(".inline-credits")).toContainText("raw");
-    await expect(type.locator(".inline-credits")).toContainText("translator");
+    await expect(type.locator(".vertical-credits")).toContainText("raw");
+    await expect(type.locator(".vertical-credits")).toContainText("translator");
     await screenshot(type, "type-desktop");
     await uploadAndFinish(type, "Type");
   }
@@ -517,8 +524,13 @@ try {
   });
   await protectedRow.locator("summary").click();
   await expect(
-    protectedRow.getByRole("button", { name: /Protegido/ }),
-  ).toBeDisabled();
+    protectedRow.getByRole("button", { name: "Excluir capítulo", exact: true }),
+  ).toBeEnabled();
+  await protectedRow.getByRole("button", { name: "Excluir capítulo", exact: true }).click();
+  await expect(admin.getByRole("dialog").getByRole("button", { name: "Excluir capítulo" })).toBeDisabled();
+  await admin.getByRole("dialog").getByRole("button", { name: "Cancelar", exact: true }).click();
+  const inboxChapter = await start(79);
+  await finish(inboxChapter, "RAW", users.raw);
   for (const path of ["/", "/works", "/notifications"]) {
     await go(admin, path);
     await screenshot(
@@ -532,7 +544,10 @@ try {
   assert.equal((await sql("select * from production_email_outbox")).rowCount, 0);
   assert.equal((await sql("select * from email_worker_diagnostics")).rowCount, 0);
   for (const [width, height, label] of [
+    [2560, 1440, "1440p"],
+    [1920, 1080, "1080p"],
     [1280, 720, "notebook"],
+    [820, 1180, "tablet"],
     [390, 844, "mobile"],
   ]) {
     await admin.setViewportSize({ width, height });
@@ -563,22 +578,84 @@ try {
     }
   }
   assert.ok(downloads >= 5);
+  await admin.setViewportSize({ width: 1440, height: 960 });
   const returned = await start(82);
   await go(admin, `/chapters/${returned.id}`);
-  await admin.getByText("Gerenciar tarefas da equipe", { exact: true }).click();
-  await admin
-    .getByRole("button", { name: "Devolver RAW à fila", exact: true })
-    .click();
-  await expect(
-    admin.getByRole("button", { name: "Devolver RAW à fila", exact: true }),
-  ).toHaveCount(0);
+  await admin.locator(".chapter-administration > summary").click();
+  const rawStage = await stage(returned, "RAW");
+  await admin.getByLabel("Etapa para atribuir").selectOption(rawStage.id);
+  await admin.getByLabel("Novo responsável").selectOption(users.raw2);
+  await admin.getByRole("button", { name: "Salvar responsável" }).click();
+  await admin.getByRole("dialog").getByRole("button", { name: "Confirmar alteração" }).click();
+  await expect(admin.getByText("Responsável atualizado.", { exact: true })).toBeVisible();
+  assert.equal((await stage(returned, "RAW")).assigned_to, users.raw2);
+  await admin.getByLabel("Etapa para atribuir").selectOption(rawStage.id);
+  await admin.getByLabel("Novo responsável").selectOption("");
+  await admin.getByRole("button", { name: "Salvar responsável" }).click();
+  await admin.getByRole("dialog").getByRole("button", { name: "Confirmar alteração" }).click();
+  await expect(admin.getByText("Tarefa devolvida à fila.", { exact: true })).toBeVisible();
   assert.equal((await stage(returned, "RAW")).status, "AVAILABLE");
   await go(raw, "/raw");
   await raw
     .getByRole("button", { name: "Pegar capítulo", exact: true })
     .click();
   await expect(raw.locator(".mine-section")).toContainText("#82");
-  assert.equal((await stage(chapter, "READY")).status, "COMPLETED");
+  await raw.getByRole("button", { name: "↩ Devolver à fila", exact: true }).click();
+  await raw.getByRole("dialog").getByRole("button", { name: "Cancelar", exact: true }).click();
+  assert.equal((await stage(returned, "RAW")).status, "IN_PROGRESS");
+  await raw.getByRole("button", { name: "↩ Devolver à fila", exact: true }).click();
+  await raw.getByRole("dialog").getByRole("button", { name: "Devolver", exact: true }).click();
+  await expect(raw.locator(".work-card-action")).toHaveCount(0);
+  await go(admin, `/chapters/${returned.id}`);
+  await admin.locator(".chapter-administration > summary").click();
+  await screenshot(admin, "admin-chapter-desktop");
+  await admin.getByRole("button", { name: "Cancelar produção", exact: true }).click();
+  await admin.getByRole("dialog").getByRole("button", { name: "Cancelar produção", exact: true }).click();
+  await expect(admin.locator(".chapter-state")).toHaveText("Produção cancelada");
+  assert.equal((await sql("select status from work_chapter_catalog where id=$1", [returned.catalog_id])).rows[0].status, "TODO");
+  await go(admin, `/works/${workId}`);
+  await admin.getByRole("button", { name: "A fazer", exact: true }).click();
+  await go(admin, "/published");
+  const publishedCard = admin.locator(".publication-card").filter({ hasText: "#81" });
+  await publishedCard.locator("summary").click();
+  await publishedCard.getByRole("button", { name: "Despublicar", exact: true }).click();
+  await admin.getByRole("dialog").getByRole("button", { name: "Despublicar", exact: true }).click();
+  await expect(publishedCard).toHaveCount(0);
+  await go(admin, `/chapters/${chapter.id}`);
+  await admin.locator(".chapter-administration > summary").click();
+  await admin.getByLabel("Etapa para reabrir").selectOption((await stage(chapter, "TYPESET")).id);
+  await admin.getByLabel("Motivo da reabertura").fill("Corrigir créditos na página final");
+  await admin.getByRole("button", { name: "Reabrir etapa", exact: true }).click();
+  await admin.getByRole("dialog").getByRole("button", { name: "Reabrir etapa", exact: true }).click();
+  await expect(admin.getByText("Etapa reaberta. O andamento foi atualizado.")).toBeVisible();
+  assert.equal((await stage(chapter, "TYPESET")).status, "AVAILABLE");
+  await go(admin, `/chapters/${returned.id}`);
+  await admin.locator(".chapter-administration > summary").click();
+  await admin.getByRole("button", { name: "Excluir capítulo", exact: true }).click();
+  await admin.getByLabel("Confirmação da exclusão").fill("Distant Sky — teste #82");
+  await admin.getByRole("dialog").getByRole("button", { name: "Excluir capítulo", exact: true }).click();
+  await expect(admin).toHaveURL(/\/works$/);
+  assert.equal((await sql("select * from chapters where id=$1", [returned.id])).rowCount, 0);
+  await go(admin, "/admin/members");
+  await expect(admin.getByRole("heading", { name: "Membros da staff" })).toBeVisible();
+  await screenshot(admin, "members-desktop");
+  const typeMember = admin.locator(".member-card").filter({ hasText: "@type" });
+  await typeMember.locator("summary").click();
+  await typeMember.getByLabel("Tradutor", { exact: true }).check();
+  await expect(typeMember.locator(".member-role-badges")).toContainText("Tradutor");
+  await typeMember.getByRole("button", { name: "Desativar", exact: true }).click();
+  await admin.getByRole("dialog").getByRole("button", { name: "Desativar", exact: true }).click();
+  await expect(typeMember).toContainText("Desativado");
+  await typeMember.getByRole("button", { name: "Reativar", exact: true }).click();
+  await expect(typeMember).toContainText("Ativo");
+  await admin.getByLabel("GitHub do convidado").fill("new-member");
+  await admin.locator(".invite-form").getByLabel("Raw Provider", { exact: true }).check();
+  await admin.getByRole("button", { name: "Criar convite", exact: true }).click();
+  await expect(admin.getByText("@new-member", { exact: true })).toBeVisible();
+  await admin.getByRole("button", { name: "Cancelar convite", exact: true }).click();
+  await admin.getByRole("dialog").getByRole("button", { name: "Cancelar convite", exact: true }).click();
+  await expect(admin.getByText("@new-member", { exact: true })).toHaveCount(0);
+  assert.equal((await stage(chapter, "READY")).status, "WAITING");
   assert.deepEqual(errors, []);
   console.log(
     "PASS: Browser production cycle, all three QC returns, publication, roles/manual URL, saved catalog fields, downloads, desktop/notebook/mobile. OAuth/blob envelope is local; database permissions and transitions are real.",

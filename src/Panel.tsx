@@ -32,6 +32,9 @@ import {
 import { supabase } from "./lib/supabase";
 import { fetchChapters } from "./lib/chapters";
 import { SimpleWorkCatalog } from "./WorkCatalog";
+import { AdminChapterActions, ChapterAdmin } from "./ChapterAdmin";
+import { useConfirmation } from "./ConfirmDialog";
+import { messageOf } from "./lib/errors";
 import { orderedStages, stageLabel, stageRole } from "./workflow";
 import type {
   Artifact,
@@ -784,6 +787,7 @@ function StageWorkCard({
   showDetails?: boolean;
 }) {
   const notify = useContext(NoticeContext);
+  const { confirm, dialog } = useConfirmation();
   const fileInput = useRef<HTMLInputElement>(null);
   const [transferPercent, setTransferPercent] = useState(0);
   const [busy, setBusy] = useState("");
@@ -853,7 +857,7 @@ function StageWorkCard({
           </h3>
         </div>
         {showDetails && (
-          <Link to={`/chapters/${entry.chapter.id}`}>Ver detalhes</Link>
+          <Link className="secondary chapter-open" to={`/chapters/${entry.chapter.id}`}>Ver capítulo →</Link>
         )}
       </header>
       {entry.stage.rejection_reason && (
@@ -914,7 +918,7 @@ function StageWorkCard({
               </button>
             </div>
             <button
-              className="action-button complete-action"
+              className={`action-button complete-action${current ? " action-ready" : ""}`}
               disabled={!current || !!busy || filesLoading}
               onClick={() => void complete()}
             >
@@ -923,12 +927,12 @@ function StageWorkCard({
                 <strong>
                   {busy === "complete"
                     ? "Concluindo…"
-                    : `Concluir ${stage === "RAW" ? "RAW" : stageLabel[stage]}`}
+                    : `✓ Concluir ${stage === "RAW" ? "RAW" : stageLabel[stage]}`}
                 </strong>
                 <small>
                   {current
                     ? `Usar versão ${current.version}`
-                    : "Envie um arquivo primeiro"}
+                    : "Envie o arquivo antes de concluir."}
                 </small>
               </div>
             </button>
@@ -955,18 +959,12 @@ function StageWorkCard({
           ✓ Arquivo enviado · v{current.version} · Baixar
         </ArtifactDownload>
       )}
-      {["TYPESET", "REVIEW"].includes(stage) && (
-        <Credits
-          credits={credits.filter(
-            (credit) => credit.chapter_id === entry.chapter.id,
-          )}
-        />
-      )}
       {message && <Feedback kind={message.kind}>{message.text}</Feedback>}
       <button
-        className="release-link"
+        className="secondary return-action"
         disabled={!!busy}
-        onClick={() =>
+        onClick={async () => {
+          if (!await confirm({ title: `Devolver ${entry.chapter.work?.title} #${entry.chapter.number} para a fila?`, description: "Outra pessoa poderá assumir esta etapa. Os arquivos enviados e créditos anteriores serão preservados.", confirmLabel: "Devolver" })) return;
           void run(
             "release",
             async () => {
@@ -975,11 +973,13 @@ function StageWorkCard({
               await refresh();
             },
             "Capítulo devolvido à fila.",
-          )
-        }
+          );
+        }}
       >
-        Não vou continuar — devolver à fila
+        ↩ Devolver à fila
       </button>
+      {dialog}
+      {["TYPESET", "REVIEW"].includes(stage) && <section className="task-credits"><h4>Créditos confirmados</h4><Credits credits={credits.filter(credit => credit.chapter_id === entry.chapter.id)} /></section>}
     </article>
   );
 }
@@ -993,17 +993,16 @@ function Credits({ credits }: { credits: CreditItem[] }) {
       ) === index,
   );
   return (
-    <div className="inline-credits">
-      <strong>Créditos</strong>
+    <div className="vertical-credits" aria-label="Créditos confirmados">
       {unique.length ? (
-        unique.map((credit) => (
-          <span key={credit.id}>
-            {stageLabel[credit.stage]}:{" "}
-            <b>{credit.user?.display_name || credit.user?.github_login}</b>
-          </span>
+        orderedStages(Object.keys(stageLabel).map(stage => ({ stage: stage as Stage }))).filter(({ stage }) => unique.some(credit => credit.stage === stage)).map(({ stage }) => (
+          <div className="credit-row" key={stage}>
+            <span>{stageLabel[stage]}</span>
+            {unique.filter(credit => credit.stage === stage).map(credit => <strong key={credit.id}>{credit.user?.display_name || credit.user?.github_login || "Colaborador"}</strong>)}
+          </div>
         ))
       ) : (
-        <span>As contribuições aparecem aqui após cada conclusão.</span>
+        <p className="empty">Os créditos aparecem após a conclusão de cada etapa.</p>
       )}
     </div>
   );
@@ -1134,7 +1133,8 @@ function Ready({ chapters, refresh, publicationAvailable = true }: PanelProps) {
                     >
                       {busy === chapter.id ? "Salvando…" : "Marcar como upado"}
                     </button>
-                    <Link to={`/chapters/${chapter.id}`}>Ver créditos</Link>
+                    <Link className="secondary" to={`/chapters/${chapter.id}`}>Ver capítulo</Link>
+                    <AdminChapterActions compact chapter={chapter} onChanged={refresh} onDeleted={refresh} />
                   </div>
                 </article>
               );
@@ -1147,7 +1147,7 @@ function Ready({ chapters, refresh, publicationAvailable = true }: PanelProps) {
     </section>
   );
 }
-function Published({ chapters, publicationAvailable = true }: PanelProps) {
+function Published({ chapters, refresh, publicationAvailable = true }: PanelProps) {
   const [published, setPublished] = useState<Chapter[]>([]);
   const [page, setPage] = useState(0);
   const [more, setMore] = useState(false);
@@ -1215,6 +1215,7 @@ function Published({ chapters, publicationAvailable = true }: PanelProps) {
                     >
                       Ver capítulo
                     </Link>
+                    <AdminChapterActions compact chapter={chapter} onChanged={refresh} onDeleted={refresh} />
                   </div>
                 </article>
               );
@@ -1410,6 +1411,7 @@ type ActivityItem = {
 };
 function Chapter({ member, refresh, chapters }: PanelProps) {
   const notify = useContext(NoticeContext);
+  const navigate = useNavigate();
   const { id } = useParams();
   const [chapter, setChapter] = useState<Chapter | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1515,7 +1517,7 @@ function Chapter({ member, refresh, chapters }: PanelProps) {
   const ready = chapter.chapter_stages.some(
     (stage) => stage.stage === "READY" && stage.status === "COMPLETED",
   );
-  const chapterState = chapter.published_at
+  const chapterState = chapter.cancelled_at ? "Produção cancelada" : chapter.published_at
     ? "Upado"
     : ready
       ? "Pronto pra upar"
@@ -1540,6 +1542,15 @@ function Chapter({ member, refresh, chapters }: PanelProps) {
         </div>
       </div>
       {error && <Feedback kind="error">{error}</Feedback>}
+      {ready && !chapter.cancelled_at && (
+        <section className="chapter-focus">
+          <QueueHeading title={chapter.published_at ? "Arquivo publicado" : "Revisão aprovada"} count={1} help={chapter.published_at ? "O arquivo final e os créditos estão preservados neste capítulo." : "O arquivo final está pronto para publicação."} />
+          <div className="publication-actions">
+            {artifacts.filter(file => file.stage === "TYPESET" && file.is_current).map(file => <ArtifactDownload key={file.id} file={file} className="primary big-action">Baixar arquivo final · v{file.version}</ArtifactDownload>)}
+            {member.is_admin && !chapter.published_at && <Link to="/ready" className="secondary chapter-open">Confirmar publicação →</Link>}
+          </div>
+        </section>
+      )}
       {myStage && myStage.stage !== "REVIEW" && (
         <section className="chapter-focus">
           <QueueHeading
@@ -1646,24 +1657,23 @@ function Chapter({ member, refresh, chapters }: PanelProps) {
             </div>
           </section>
         )}
-      <div className="chapter-layout">
-        <div>
+      <div className="chapter-overview">
           <Panel title="Andamento">
             <div className="workflow">
               {orderedStages(chapter.chapter_stages).map((stage) => {
                 return (
                   <article
-                    className={`stage-step ${stage.status.toLowerCase()}`}
+                    className={`stage-step ${stage.status.toLowerCase()}${stage.assigned_to === member.user_id && stage.status === "IN_PROGRESS" ? " with-you" : ""}${stage.rejection_reason ? " needs-correction" : ""}`}
                     key={stage.id}
                   >
                     <b>
                       {stage.status === "COMPLETED"
                         ? "✓"
-                        : stageLabel[stage.stage][0]}
+                        : ["IN_PROGRESS", "AVAILABLE"].includes(stage.status) ? "●" : "○"}
                     </b>
                     <div>
                       <strong>{stageLabel[stage.stage]}</strong>
-                      <span>{statusLabel(stage.status)}</span>
+                      <span>{stage.assigned_to === member.user_id && stage.status === "IN_PROGRESS" ? "Com você" : stage.rejection_reason && stage.status === "AVAILABLE" ? "Aguardando correção" : statusLabel(stage.status)}</span>
                       {stage.assignee && (
                         <small>
                           {stage.assignee.display_name ||
@@ -1681,6 +1691,9 @@ function Chapter({ member, refresh, chapters }: PanelProps) {
               })}
             </div>
           </Panel>
+          <Panel title="Créditos"><Credits credits={credits} /></Panel>
+      </div>
+      <div className="chapter-secondary">
           <details className="chapter-details">
             <summary>
               Arquivos e versões anteriores ({artifacts.length})
@@ -1695,8 +1708,9 @@ function Chapter({ member, refresh, chapters }: PanelProps) {
                       </strong>
                       {file.is_current && <span className="badge">Atual</span>}
                       <small>
-                        {file.original_name} · {formatBytes(file.byte_size)}
+                        Enviado por {file.uploader?.display_name || file.uploader?.github_login || "colaborador"}
                       </small>
+                      <small>{file.original_name} · {formatBytes(file.byte_size)}</small>
                     </div>
                     <ArtifactDownload
                       className="secondary"
@@ -1712,49 +1726,15 @@ function Chapter({ member, refresh, chapters }: PanelProps) {
               )}
             </Panel>
           </details>
-          {member.is_admin &&
-            !chapter.published_at &&
-            chapter.chapter_stages.some(
-              (stage) =>
-                stage.status === "IN_PROGRESS" &&
-                stage.assigned_to !== member.user_id,
-            ) && (
-              <details className="chapter-details">
-                <summary>Gerenciar tarefas da equipe</summary>
-                <Panel title="Devolver uma tarefa à fila">
-                  <p>
-                    Use quando o responsável não puder continuar. Arquivos e
-                    créditos são preservados.
-                  </p>
-                  {chapter.chapter_stages
-                    .filter(
-                      (stage) =>
-                        stage.status === "IN_PROGRESS" &&
-                        stage.assigned_to !== member.user_id,
-                    )
-                    .map((stage) => (
-                      <button
-                        key={stage.id}
-                        className="secondary"
-                        disabled={!!busy}
-                        onClick={() => {
-                          if (
-                            window.confirm(
-                              `Devolver ${stageLabel[stage.stage]} de ${stage.assignee?.display_name || stage.assignee?.github_login || "outro membro"} à fila?`,
-                            )
-                          )
-                            void run("release", async () => {
-                              await releaseStage(stage.id);
-                              notify("Tarefa devolvida à fila.");
-                            });
-                        }}
-                      >
-                        Devolver {stageLabel[stage.stage]} à fila
-                      </button>
-                    ))}
-                </Panel>
-              </details>
-            )}
+          <details className="chapter-details">
+            <summary>Histórico do capítulo</summary>
+            <Panel title="Últimas atividades">
+              {activity.length ? <ol className="chapter-timeline">{activity.map(item => <li key={item.id}>
+                <time dateTime={item.created_at}>{formatDate(item.created_at)}</time>
+                <div><p><strong>{item.actor?.display_name || item.actor?.github_login || "Sistema"}</strong> {activityText(item)}</p>{item.metadata?.reason && <small>Motivo: {item.metadata.reason}</small>}</div>
+              </li>)}</ol> : <Empty text="Nenhuma atividade ainda." />}
+            </Panel>
+          </details>
           <Panel title="Observações">
             <div className="comment-form">
               <textarea
@@ -1799,43 +1779,12 @@ function Chapter({ member, refresh, chapters }: PanelProps) {
               </article>
             ))}
           </Panel>
-        </div>
-        <aside className="chapter-aside">
-          <Panel title="Quem trabalhou">
-            <Credits credits={credits} />
-          </Panel>
-          <details className="chapter-details">
-            <summary>Histórico do capítulo</summary>
-            <Panel title="Últimas atividades">
-              {activity.length ? (
-                activity.map((item) => (
-                  <div className="activity" key={item.id}>
-                    <i />
-                    <p>
-                      <strong>
-                        {item.actor?.display_name ||
-                          item.actor?.github_login ||
-                          "Sistema"}
-                      </strong>{" "}
-                      {activityText(item)}
-                      {item.metadata?.reason && (
-                        <small>Motivo: {item.metadata.reason}</small>
-                      )}
-                      <small>{formatDate(item.created_at)}</small>
-                    </p>
-                  </div>
-                ))
-              ) : (
-                <Empty text="Nenhuma atividade ainda." />
-              )}
-            </Panel>
-          </details>
-        </aside>
+        {member.is_admin && <ChapterAdmin chapter={chapter} refresh={async () => { await load(); await refresh(); }} onDeleted={async () => { notify("Capítulo excluído."); await refresh(); navigate("/works"); }} />}
       </div>
     </section>
   );
 }
-function Notifications({ refresh, notifications }: PanelProps) {
+function Notifications({ refresh, notifications, chapters }: PanelProps) {
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -1852,6 +1801,8 @@ function Notifications({ refresh, notifications }: PanelProps) {
     void supabase
       ?.from("notifications")
       .select("id,body,link_path,read_at")
+      .is("read_at", null)
+      .is("archived_at", null)
       .order("created_at", { ascending: false })
       .limit(50)
       .then(({ data, error }) => {
@@ -1859,7 +1810,7 @@ function Notifications({ refresh, notifications }: PanelProps) {
         setLoading(false);
         setError(error ? messageOf(error) : "");
       });
-  useEffect(load, [notifications]);
+  useEffect(load, [notifications, chapters]);
   const run = async (action: () => Promise<void>) => {
     if (busy) return;
     setBusy(true);
@@ -1883,7 +1834,7 @@ function Notifications({ refresh, notifications }: PanelProps) {
       <div className="page-heading">
         <p className="eyebrow">AVISOS DA STAFF</p>
         <h2>Notificações</h2>
-        <p>Novos trabalhos e atualizações dos seus capítulos.</p>
+        <p>Só o que ainda precisa da sua atenção. Avisos resolvidos saem daqui.</p>
       </div>
       {error && <Feedback kind="error">{error}</Feedback>}
       <button
@@ -1893,17 +1844,15 @@ function Notifications({ refresh, notifications }: PanelProps) {
       >
         Marcar todas como lidas
       </button>
-      <Panel title="Últimos avisos">
+      <Panel title="Suas pendências">
         {items.map((item) => (
-          <button
-            className={`notification ${item.read_at ? "read" : "unread"}`}
+          <article
+            className="notification unread"
             key={item.id}
-            disabled={busy}
-            onClick={() => void run(() => open(item))}
           >
             <span>{item.body}</span>
-            <small>{item.read_at ? "Abrir →" : "Novo · Abrir →"}</small>
-          </button>
+            <div className="notification-actions"><button className="primary" disabled={busy} onClick={() => void run(() => open(item))}>Abrir capítulo</button><button className="secondary" disabled={busy} onClick={() => void run(() => markNotificationRead(item.id))}>Marcar como lida</button></div>
+          </article>
         ))}
         {!items.length && (
           <Empty
@@ -1935,6 +1884,8 @@ type MemberItem = {
 };
 type InviteItem = { github_login: string; roles: Role[]; is_admin: boolean };
 function Members() {
+  const notify = useContext(NoticeContext);
+  const { confirm, dialog } = useConfirmation();
   const [members, setMembers] = useState<MemberItem[]>([]);
   const [invites, setInvites] = useState<InviteItem[]>([]);
   const [login, setLogin] = useState("");
@@ -1986,9 +1937,12 @@ function Members() {
       setRoles([]);
       setAdmin(false);
       await load();
+      notify(`Convite criado para @${clean}.`);
     }
   };
   const toggle = async (item: MemberItem) => {
+    if (busy) return;
+    if (item.is_active && !await confirm({ title: `Desativar ${item.display_name || item.github_login}?`, description: "Esta pessoa perderá acesso à central. Você poderá reativá-la depois.", confirmLabel: "Desativar", danger: true })) return;
     setBusy(item.user_id);
     const { error } = await supabase!
       .from("staff_members")
@@ -1996,9 +1950,11 @@ function Members() {
       .eq("user_id", item.user_id);
     setBusy("");
     if (error) setError(messageOf(error));
-    else await load();
+    else { await load(); notify(item.is_active ? "Membro desativado." : "Membro reativado."); }
   };
   const toggleAdmin = async (item: MemberItem) => {
+    if (busy) return;
+    if (!await confirm({ title: `${item.is_admin ? "Remover" : "Conceder"} acesso administrativo de ${item.display_name || item.github_login}?`, description: "Administradores podem gerenciar a equipe e alterar ou excluir capítulos. Os cargos de produção são separados desta permissão.", confirmLabel: "Confirmar permissão", danger: true })) return;
     setBusy(item.user_id);
     const { error } = await supabase!
       .from("staff_members")
@@ -2006,11 +1962,14 @@ function Members() {
       .eq("user_id", item.user_id);
     setBusy("");
     if (error) setError(messageOf(error));
-    else await load();
+    else { await load(); notify("Permissão administrativa atualizada."); }
   };
   const memberRole = async (item: MemberItem, role: Role) => {
+    if (busy) return;
     setBusy(item.user_id);
     const has = item.user_roles.some((value) => value.role_code === role);
+    const optimisticRoles = has ? item.user_roles.filter(value => value.role_code !== role) : [...item.user_roles, { role_code: role }];
+    setMembers(current => current.map(member => member.user_id === item.user_id ? { ...member, user_roles: optimisticRoles } : member));
     const request = has
       ? supabase!
           .from("user_roles")
@@ -2022,8 +1981,11 @@ function Members() {
           .insert({ user_id: item.user_id, role_code: role });
     const { error } = await request;
     setBusy("");
-    if (error) setError(messageOf(error));
-    else await load();
+    if (error) {
+      setMembers(current => current.map(member => member.user_id === item.user_id ? { ...member, user_roles: item.user_roles } : member));
+      setError(messageOf(error));
+    }
+    else { await load(); notify("Cargos atualizados."); }
   };
   return (
     <section className="page">
@@ -2033,9 +1995,10 @@ function Members() {
         <p>Convites, cargos e acesso da staff.</p>
       </div>
       {error && <p className="error">{error}</p>}
-      <Panel title="Pré-autorizar GitHub">
+      <Panel title="Convidar para a staff">
         <div className="invite-form">
           <input
+            aria-label="GitHub do convidado"
             value={login}
             onChange={(e) => setLogin(e.target.value)}
             placeholder="@github-login"
@@ -2088,14 +2051,15 @@ function Members() {
                 </span>
               </div>
               <button
-                className="danger-text"
-                onClick={() =>
-                  void supabase!
-                    .from("staff_invites")
-                    .delete()
-                    .eq("github_login", item.github_login)
-                    .then(() => load())
-                }
+                className="secondary"
+                disabled={!!busy}
+                onClick={async () => {
+                  if (!await confirm({ title: `Cancelar convite de @${item.github_login}?`, description: "Este convite deixará de permitir a entrada na staff.", confirmLabel: "Cancelar convite" })) return;
+                  setBusy(item.github_login);
+                  const { error } = await supabase!.from("staff_invites").delete().eq("github_login", item.github_login);
+                  if (error) setError(messageOf(error)); else { await load(); notify("Convite cancelado."); }
+                  setBusy("");
+                }}
               >
                 Cancelar convite
               </button>
@@ -2121,26 +2085,21 @@ function Members() {
               <div>
                 <button
                   className="secondary"
-                  disabled={busy === item.user_id}
-                  onClick={() => void toggleAdmin(item)}
-                >
-                  {item.is_admin ? "Remover admin" : "Tornar admin"}
-                </button>
-                <button
-                  className="secondary"
-                  disabled={busy === item.user_id}
+                  disabled={!!busy}
                   onClick={() => void toggle(item)}
                 >
-                  {item.is_active ? "Desativar" : "Reativar"}
+                  {busy === item.user_id ? "Salvando…" : item.is_active ? "Desativar" : "Reativar"}
                 </button>
               </div>
             </div>
+            <div className="member-role-badges">{staffRoles.filter(role => item.user_roles.some(r => r.role_code === role.code)).map(role => <span key={role.code}>{role.label}</span>)}{!item.user_roles.length && <span>Sem cargo de produção</span>}</div>
+            <details className="member-settings"><summary>Editar cargos e permissões</summary>
             <div className="role-picker compact">
               {staffRoles.map((role) => (
                 <label key={role.code}>
                   <input
                     type="checkbox"
-                    disabled={busy === item.user_id}
+                    disabled={!!busy}
                     checked={item.user_roles.some(
                       (value) => value.role_code === role.code,
                     )}
@@ -2150,9 +2109,12 @@ function Members() {
                 </label>
               ))}
             </div>
+            <button className="secondary" disabled={!!busy} onClick={() => void toggleAdmin(item)}>{item.is_admin ? "Remover permissão de administrador" : "Conceder permissão de administrador"}</button>
+            </details>
           </article>
         ))}
       </Panel>
+      {dialog}
     </section>
   );
 }
@@ -2346,21 +2308,6 @@ const formatBytes = (value: number) =>
   value < 1048576
     ? `${Math.max(1, Math.round(value / 1024))} KB`
     : `${(value / 1048576).toFixed(1)} MB`;
-const messageOf = (cause: unknown) => {
-  const raw =
-    cause instanceof Error
-      ? cause.message
-      : cause && typeof cause === "object" && "message" in cause
-        ? String((cause as { message: unknown }).message)
-        : "Erro inesperado.";
-  if (/duplicate|unique/i.test(raw))
-    return "Este item acabou de ser alterado por outra pessoa.";
-  if (/permission|permissão|policy|row-level/i.test(raw))
-    return "Você não tem permissão para executar esta ação.";
-  if (/último administrador|last admin/i.test(raw))
-    return "O último administrador ativo não pode perder acesso.";
-  return raw;
-};
 const activityText = (item: ActivityItem) => {
   const action =
     {
@@ -2373,6 +2320,10 @@ const activityText = (item: ActivityItem) => {
       stage_available: "disponibilizou",
       production_started: "iniciou a produção em",
       published: "marcou o capítulo como upado",
+      unpublished: "devolveu o capítulo para Pra upar",
+      production_cancelled: "cancelou a produção",
+      stage_reopened_by_admin: "reabriu",
+      reassigned: "alterou o responsável por",
     }[item.action] || item.action;
   return `${action}${item.stage && !["approved", "rejected"].includes(item.action) ? ` ${stageLabel[item.stage]}` : ""}`;
 };

@@ -41,6 +41,7 @@ export type Chapter = {
   number: string;
   title: string | null;
   published_at?: string | null;
+  cancelled_at?: string | null;
   work: { id: string; title: string } | null;
   chapter_stages: ChapterStage[];
 };

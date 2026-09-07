@@ -12,8 +12,9 @@ export async function fetchChapters(
   const query = (publication: boolean) => {
     let request = client
       .from("chapters")
-      .select(fields + (publication ? ",published_at" : ""));
+      .select(fields + ",cancelled_at" + (publication ? ",published_at" : ""));
     if (options.id) return request.eq("id", options.id);
+    request = request.is("cancelled_at", null);
     if (publication)
       request = options.published
         ? request.not("published_at", "is", null)

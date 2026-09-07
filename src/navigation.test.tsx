@@ -37,7 +37,7 @@ describe("staff panel routes", () => {
     expect(page("/published")).toContain("Upados");
     expect(page("/works")).toContain("Nova obra");
     expect(page("/notifications")).toContain("Notificações");
-    expect(page("/admin/members")).toContain("Pré-autorizar GitHub");
+    expect(page("/admin/members")).toContain("Convidar para a staff");
     expect(page("/admin/settings")).toContain("Configurações");
   });
   it("shows and authorizes production channels by role", () => {

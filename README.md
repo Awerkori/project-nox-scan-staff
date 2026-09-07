@@ -99,6 +99,18 @@ O app usa `HashRouter`, portanto URLs do Pages não sofrem 404 em rotas internas
 
 ## Validação da revisão de UX
 
+### Administração e pendências
+
+A migration `20260907010000_admin_controls_and_pending_notifications.sql` acrescenta ferramentas administrativas protegidas no banco. **Cancelar produção** devolve o catálogo a “A fazer” e preserva arquivos, versões, créditos e histórico. Reiniciar reutiliza o mesmo capítulo, exigindo um novo envio. **Reabrir etapa** invalida somente a etapa e suas dependências; **despublicar** devolve para “Pra upar”. Reatribuir exige um membro ativo com o cargo correto.
+
+**Excluir capítulo** exige confirmação digitada, remove os registros associados no banco e mantém uma auditoria restrita a administradores. Arquivos externos não são apagados. Nenhuma dessas operações altera o transporte Telegram ou os arquivos antigos do Supabase.
+
+Notificações exibem somente pendências não lidas e atuais. Assumir uma tarefa arquiva a oferta para todos; devolver restaura a oferta. Publicar ou cancelar arquiva os avisos do capítulo. O histórico permanece na central do capítulo, separado da caixa de pendências.
+
+`npm run test:admin` testa essas operações, permissões negativas, confirmação de exclusão, créditos preservados, dependências reabertas e concorrência em PostgreSQL isolado. Também é obrigatório no deploy.
+
+`supabase db query --linked --file tests/remote-administration.sql` valida administração e pendências no remoto com rollback integral. `node scripts/test-admin-live.mjs` exige CLI autenticada e testa o site publicado com uma sessão administrativa em memória: percorre todas as telas em cinco larguras e executa as novas ações somente em uma obra temporária exclusiva do teste, removida ao terminar. Não modifica obras existentes nem o storage. Não equivale a testar o login GitHub de terceiros.
+
 `npm run test:db` cria um banco **novo e exclusivamente local** em `127.0.0.1:55432`, usando o usuário do sistema com permissão de criar bancos/roles. Não aponta para produção, não apaga bancos existentes e executa todas as migrations, RLS e RPCs. Auth/Storage têm schemas compatíveis; apenas pg_net, cron e Vault são simulados.
 
 `npm run test:browser` usa o React real e esse PostgreSQL com contas separadas por cargo. Percorre upload, conclusão, os três retornos de QC, publicação, rotas negadas e layouts desktop/notebook/mobile. O envelope HTTP do Supabase, a sessão OAuth e o transporte de arquivos são locais; isso **não comprova login externo ou entrega real de e-mail**. Screenshots ficam em `test-results/` (ignoradas pelo Git). Os dois testes são obrigatórios no deploy do Pages.

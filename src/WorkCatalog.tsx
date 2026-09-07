@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { supabase } from "./lib/supabase";
 import type { CatalogStatus, StaffMember } from "./types";
+import { AdminChapterActions, adminOperation } from "./ChapterAdmin";
+import { useConfirmation } from "./ConfirmDialog";
+import { messageOf } from "./lib/errors";
 
 type Work = {
   id: string;
@@ -15,7 +18,7 @@ type CatalogChapter = {
   id: string;
   number: number;
   status: CatalogStatus;
-  production: { id: string }[];
+  production: { id: string; cancelled_at?: string | null; published_at?: string | null }[];
 };
 const labels: Record<CatalogStatus, string> = {
   TODO: "A fazer",
@@ -61,6 +64,7 @@ export function SimpleWorkCatalog({
   const [busy, setBusy] = useState("");
   const [feedback, setFeedback] = useState("");
   const [page, setPage] = useState(0);
+  const { confirm, dialog } = useConfirmation();
 
   const load = useCallback(async () => {
     if (!id || !supabase) return;
@@ -72,7 +76,7 @@ export function SimpleWorkCatalog({
         .maybeSingle(),
       supabase
         .from("work_chapter_catalog")
-        .select("id,number,status,production:chapters(id)")
+        .select("id,number,status,production:chapters(id,cancelled_at,published_at)")
         .eq("work_id", id)
         .order("number"),
     ]);
@@ -101,11 +105,7 @@ export function SimpleWorkCatalog({
       if (key === "work") setFeedback("Informações da obra salvas.");
       if (key === "cover") setFeedback("Capa atualizada.");
     } catch (error) {
-      setFeedback(
-        error instanceof Error
-          ? error.message
-          : "Não foi possível concluir a ação.",
-      );
+      setFeedback(messageOf(error));
     } finally {
       setBusy("");
     }
@@ -134,7 +134,7 @@ export function SimpleWorkCatalog({
       if (
         chapters.some(
           (chapter) =>
-            ids.includes(chapter.id) && chapter.production.length > 0,
+            ids.includes(chapter.id) && chapter.production.some(p => !p.cancelled_at),
         )
       )
         throw new Error(
@@ -148,28 +148,14 @@ export function SimpleWorkCatalog({
       setSelected(new Set());
       setFeedback(`${ids.length} capítulo(s) atualizado(s).`);
     });
-  const remove = (ids: string[]) =>
-    run("remove", async () => {
-      const targets = chapters.filter((chapter) => ids.includes(chapter.id));
-      if (
-        targets.some(
-          (chapter) =>
-            !canRemoveCatalogChapter(
-              chapter.status,
-              chapter.production.length > 0,
-            ),
-        )
-      )
-        throw new Error("Capítulos em produção não podem ser removidos.");
-      if (!window.confirm(`Remover ${ids.length} capítulo(s) do catálogo?`))
-        return;
-      const { error } = await supabase!.rpc("delete_catalog_chapters", {
-        p_ids: ids,
-      });
-      if (error) throw error;
+  const remove = async (ids: string[]) => {
+    if (!await confirm({ title: `Excluir ${ids.length} capítulo(s) de ${work?.title}?`, description: "Os capítulos selecionados e seus dados de produção serão excluídos da central. Arquivos já armazenados não serão apagados. Esta ação não pode ser desfeita.", requiredText: "EXCLUIR", confirmLabel: "Excluir capítulos", danger: true })) return;
+    return run("remove", async () => {
+      await adminOperation("admin_delete_catalog_chapters", { p_ids: ids, p_confirmation: "EXCLUIR" });
       setSelected(new Set());
       setFeedback(`${ids.length} capítulo(s) removido(s).`);
     });
+  };
   const visible = useMemo(
     () =>
       chapters.filter(
@@ -181,7 +167,7 @@ export function SimpleWorkCatalog({
   const currentPage = Math.min(page, pageCount - 1);
   const pageChapters = visible.slice(currentPage * 30, currentPage * 30 + 30);
   const selectedHasProduction = chapters.some(
-    (chapter) => selected.has(chapter.id) && chapter.production.length > 0,
+    (chapter) => selected.has(chapter.id) && chapter.production.some(p => !p.cancelled_at),
   );
   const counts = {
     completed: chapters.filter((chapter) => chapter.status === "COMPLETED")
@@ -321,7 +307,7 @@ export function SimpleWorkCatalog({
           <div className="bulk-bar">
             <strong>{selected.size} selecionado(s)</strong>
             {selectedHasProduction && (
-              <span>Itens com produção não podem ser alterados.</span>
+              <span>Para mudar o status, cancele a produção no menu do capítulo.</span>
             )}
             <button
               className="secondary"
@@ -339,10 +325,10 @@ export function SimpleWorkCatalog({
             </button>
             <button
               className="danger"
-              disabled={!!busy || selectedHasProduction}
+              disabled={!!busy}
               onClick={() => void remove([...selected])}
             >
-              Remover
+              Excluir selecionados
             </button>
             <button className="ghost" onClick={() => setSelected(new Set())}>
               Cancelar seleção
@@ -394,7 +380,12 @@ export function SimpleWorkCatalog({
               >
                 {labels[chapter.status]}
               </span>
-              {member.is_admin && (
+              {member.is_admin && chapter.production[0] && <AdminChapterActions compact
+                chapter={{ ...chapter.production[0], number: String(chapter.number), title: null, work: { id: work.id, title: work.title }, chapter_stages: [] }}
+                onChanged={load} onDeleted={async () => { setSelected(new Set()); setFeedback("Capítulo excluído."); await load(); }}
+                extraActions={<><button disabled={!!busy || !chapter.production[0].cancelled_at} onClick={() => void updateStatus([chapter.id], "TODO")}>Marcar como A fazer</button><button disabled={!!busy || !chapter.production[0].cancelled_at} onClick={() => void updateStatus([chapter.id], "COMPLETED")}>Marcar como concluído</button></>}
+              />}
+              {member.is_admin && !chapter.production[0] && (
                 <details className="chapter-menu">
                   <summary aria-label={`Ações do capítulo ${chapter.number}`}>
                     ⋯
@@ -416,21 +407,10 @@ export function SimpleWorkCatalog({
                     </button>
                     <button
                       className="danger-text"
-                      disabled={
-                        !!busy ||
-                        !canRemoveCatalogChapter(
-                          chapter.status,
-                          chapter.production.length > 0,
-                        )
-                      }
+                      disabled={!!busy}
                       onClick={() => void remove([chapter.id])}
                     >
-                      {!canRemoveCatalogChapter(
-                        chapter.status,
-                        chapter.production.length > 0,
-                      )
-                        ? "Protegido: já entrou em produção"
-                        : "Remover capítulo"}
+                      Excluir capítulo
                     </button>
                   </div>
                 </details>
@@ -463,6 +443,7 @@ export function SimpleWorkCatalog({
           </div>
         )}
       </section>
+      {dialog}
     </section>
   );
 }
