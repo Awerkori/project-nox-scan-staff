@@ -33,7 +33,94 @@ try {
   const catalog = checked(await staff.from("work_chapter_catalog").select("id").eq("work_id", work.id).eq("number", 1).single());
   let chapter = checked(await staff.from("chapters").select("id").eq("catalog_id", catalog.id).maybeSingle());
   if (!chapter) chapter = checked(await staff.rpc("start_catalog_production", { p_catalog_id: catalog.id }));
-  if (process.argv[2] === "browser") {
+  if (process.argv[2] === "audit") {
+    const config = checked(await staff.rpc("artifact_upload_configuration"));
+    assert.equal(config.provider, "telegram");
+    const emails = checked(await admin.from("production_email_settings").select("enabled").eq("id", true).single());
+    assert.equal(emails.enabled, false);
+    const queued = checked(await admin.from("production_email_outbox").select("id").in("status", ["PENDING", "PROCESSING", "FAILED"]).limit(1));
+    assert.equal(queued.length, 0, "Optional email must not leave queued errors");
+    const notifications = checked(await staff.from("notifications").select("id").eq("chapter_id", chapter.id));
+    assert.ok(notifications.length > 0, "Internal notifications must not depend on email");
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const context = await browser.newContext();
+      await context.addInitScript(session => localStorage.setItem("sb-pgumtergvtbeepzpgvkv-auth-token", JSON.stringify(session)), login.session);
+      const page = await context.newPage();
+      const errors = [];
+      page.on("pageerror", () => errors.push("pageerror"));
+      page.on("console", message => { if (message.type() === "error") errors.push("console-error"); });
+      for (const [width, height, label] of [[1440, 960, "desktop"], [1280, 720, "notebook"], [390, 844, "mobile"]]) {
+        await page.setViewportSize({ width, height });
+        for (const route of ["", "raw", "clean-redraw", "translation", "typeset", "review", "ready", "published", "works", "notifications", `chapters/${chapter.id}`]) {
+          await page.goto(`https://awerkori.github.io/project-nox-scan-staff/#/${route}`, { waitUntil: "networkidle" });
+          await expect(page.locator(".page-heading h2")).toBeVisible({ timeout: 30000 });
+          assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `Overflow: ${label}/${route}`);
+          await expect(page.locator(".work-card-action, .available-card").filter({ hasText: title })).toHaveCount(0);
+          if (route === "published") await expect(page.locator(".publication-card").filter({ hasText: title })).toBeVisible();
+          if (route.startsWith("chapters/")) {
+            await expect(page.locator(".workflow .stage-step strong")).toHaveText(["RAW", "Clean / Redraw", "Tradução", "Type", "Revisão", "Pra upar"]);
+            await page.screenshot({ path: `test-results/production-telegram-history-${label}.png`, fullPage: true });
+          }
+        }
+      }
+      assert.deepEqual(errors, []);
+      console.log("PASS: production channels, publication history, ordered workflow, desktop/notebook/mobile, clean console, internal notifications and optional email disabled with no queued errors.");
+    } finally { await browser.close(); }
+  } else if (process.argv[2] === "finish") {
+    const stages = async () => checked(await staff.from("chapter_stages").select("id,stage,status,assigned_to").eq("chapter_id", chapter.id));
+    const getStage = async code => (await stages()).find(s => s.stage === code);
+    const final = checked(await staff.from("chapters").select("published_at").eq("id", chapter.id).single());
+    if (final.published_at) throw new Error("Validation chapter already published");
+    const large = checked(await staff.from("artifacts").select("id").eq("chapter_id", chapter.id).eq("stage", "RAW").eq("upload_status", "AVAILABLE").eq("byte_size", 209715200));
+    assert.ok(large.length > 0, "Finish only after the real large-file test");
+    const finishStage = async code => {
+      const s = await getStage(code);
+      if (s.status === "COMPLETED") return;
+      if (s.status === "AVAILABLE") checked(await staff.rpc("claim_stage", { p_stage_id: s.id }));
+      if (code !== "RAW") {
+        const bytes = Buffer.from(`Validação técnica Project Nox — ${code} — ${Date.now()}`);
+        const hash = createHash("sha256").update(bytes).digest("hex");
+        const artifact = checked(await staff.rpc("reserve_artifact_upload", { p_chapter_id: chapter.id, p_stage: code, p_original_name: `validacao-${code}.txt`, p_mime_type: "text/plain", p_byte_size: bytes.length }));
+        assert.equal(artifact.provider, "telegram");
+        const response = await fetch(`${bridge}/files/${artifact.id}/parts/0`, { method: "POST", body: bytes, headers: { Authorization: `Bearer ${login.session.access_token}`, "Content-Type": "application/octet-stream", "X-Part-SHA256": hash } });
+        assert.equal(response.status, 200);
+        checked(await staff.rpc("finalize_artifact_upload", { p_artifact_id: artifact.id }));
+      }
+      checked(await staff.rpc("complete_stage", { p_stage_id: s.id }));
+      console.log("Real production workflow complete:", code);
+    };
+    await finishStage("RAW");
+    assert.ok(["AVAILABLE", "COMPLETED"].includes((await getStage("CLEAN_REDRAW")).status));
+    assert.ok(["AVAILABLE", "COMPLETED"].includes((await getStage("TRANSLATION")).status));
+    const premature = await staff.rpc("claim_stage", { p_stage_id: (await getStage("TYPESET")).id });
+    assert.ok(premature.error, "Type must remain blocked before both dependencies");
+    await finishStage("CLEAN_REDRAW");
+    assert.equal((await getStage("TYPESET")).status, "WAITING");
+    await finishStage("TRANSLATION");
+    assert.equal((await getStage("TYPESET")).status, "AVAILABLE");
+    await finishStage("TYPESET");
+    const review = await getStage("REVIEW");
+    checked(await staff.rpc("claim_stage", { p_stage_id: review.id }));
+    checked(await staff.rpc("review_chapter", { p_stage_id: review.id, p_approved: true }));
+    assert.equal((await getStage("READY")).status, "COMPLETED");
+    const catalogDone = checked(await staff.from("work_chapter_catalog").select("status").eq("id", catalog.id).single());
+    assert.equal(catalogDone.status, "COMPLETED");
+    checked(await staff.rpc("mark_chapter_published", { p_chapter_id: chapter.id }));
+    assert.ok(checked(await staff.from("chapters").select("published_at").eq("id", chapter.id).single()).published_at);
+    assert.ok((await stages()).every(s => s.status === "COMPLETED"));
+    const credits = checked(await staff.from("stage_completions").select("stage,user_id").eq("chapter_id", chapter.id));
+    assert.equal(new Set(credits.map(c => c.stage)).size, 5);
+    const legacy = checked(await staff.from("artifacts").select("provider_key,byte_size").eq("provider", "supabase").eq("upload_status", "AVAILABLE").limit(1));
+    if (legacy.length) {
+      const signed = checked(await staff.storage.from("scan-artifacts").createSignedUrl(legacy[0].provider_key, 60));
+      const response = await fetch(signed.signedUrl);
+      assert.equal(response.status, 200);
+      assert.equal((await response.arrayBuffer()).byteLength, legacy[0].byte_size);
+      console.log("PASS: existing private Supabase artifact remains downloadable.");
+    }
+    console.log("PASS: live RAW → parallel Clean/Translation → Type → QC → ready → published. All five credits retained; technical validation chapter removed from active queues, files preserved in history.");
+  } else if (process.argv[2] === "browser") {
     const deployed = await (await fetch("https://awerkori.github.io/project-nox-scan-staff/")).text();
     const entry = deployed.match(/src="([^"]+\/index-[^"]+\.js)"/);
     assert.ok(entry, "Production application bundle not found");

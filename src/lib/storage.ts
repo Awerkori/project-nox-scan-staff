@@ -25,7 +25,12 @@ async function authorization() {
 
 async function transfer(url: string, init: RequestInit): Promise<Response> {
   for (let attempt = 0; ; attempt++) {
-    const response = await fetch(url, { ...init, signal: AbortSignal.timeout(120000) });
+    let response: Response;
+    try {
+      response = await fetch(url, { ...init, signal: AbortSignal.timeout(120000) });
+    } catch {
+      throw new Error("A conexão foi interrompida. Confira sua internet e tente novamente; os arquivos já concluídos continuam salvos.");
+    }
     if (response.status === 429 && attempt < 3) {
       const delay = Math.min(60, Math.max(1, Number(response.headers.get("Retry-After")) || 30));
       await new Promise(resolve => setTimeout(resolve, delay * 1000));

@@ -16,6 +16,12 @@ export const stageRole: Record<Exclude<Stage, "READY">, string> = {
   REVIEW: "REVIEWER_QC",
 };
 
+// PostgREST nested rows have no guaranteed order; always present the real flow.
+export function orderedStages<T extends { stage: Stage }>(stages: T[]): T[] {
+  const order: Stage[] = ["RAW", "CLEAN_REDRAW", "TRANSLATION", "TYPESET", "REVIEW", "READY"];
+  return [...stages].sort((a, b) => order.indexOf(a.stage) - order.indexOf(b.stage));
+}
+
 export function isStageAvailable(
   stage: Stage,
   stages: Pick<ChapterStage, "stage" | "status">[],

@@ -32,7 +32,7 @@ import {
 import { supabase } from "./lib/supabase";
 import { fetchChapters } from "./lib/chapters";
 import { SimpleWorkCatalog } from "./WorkCatalog";
-import { stageLabel, stageRole } from "./workflow";
+import { orderedStages, stageLabel, stageRole } from "./workflow";
 import type {
   Artifact,
   Chapter,
@@ -1650,7 +1650,7 @@ function Chapter({ member, refresh, chapters }: PanelProps) {
         <div>
           <Panel title="Andamento">
             <div className="workflow">
-              {chapter.chapter_stages.map((stage) => {
+              {orderedStages(chapter.chapter_stages).map((stage) => {
                 return (
                   <article
                     className={`stage-step ${stage.status.toLowerCase()}`}
