@@ -40,9 +40,16 @@ try {
   await mkdir("test-results", { recursive: true });
   for (const [width, height, label] of [[2560,1440,"1440p"], [1920,1080,"1080p"], [1280,720,"notebook"], [820,1180,"tablet"], [390,844,"mobile"]]) {
     await page.setViewportSize({ width, height });
-    for (const route of ["", "raw", "clean-redraw", "translation", "typeset", "review", "ready", "published", "works", "notifications", "admin/members", "admin/settings", `chapters/${chapter.id}`]) {
-      await page.goto(`${site}#/${route}`, { waitUntil: "networkidle" });
-      await expect(page.locator(".page-heading h2")).toBeVisible({ timeout: 30000 });
+    for (const route of ["", "raw", "clean-redraw", "translation", "typeset", "review", "ready", "published", "works", `works/${work.id}`, "notifications", "admin/members", "admin/settings", `chapters/${chapter.id}`]) {
+      // A different query forces a document navigation. Hash-only navigation
+      // can otherwise capture the preceding screen before async data settles.
+      await page.goto(`${site}?ux-check=${label}-${encodeURIComponent(route)}#/${route}`, { waitUntil: "networkidle" });
+      await expect(route === "admin/settings" ? page.getByRole("heading", { name: "Configurações", exact: true }) : page.locator(".page-heading h2")).toBeVisible({ timeout: 30000 });
+      await expect(page.getByText(/^Carregando/)).toHaveCount(0, { timeout: 30000 });
+      if (route === `works/${work.id}`) {
+        await expect(page.getByLabel("Título", { exact: true })).toHaveValue(title);
+        await expect(page.getByRole("textbox", { name: "Sinopse", exact: true })).toHaveValue("Validação de interface. Removida ao terminar este teste.");
+      }
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `Overflow ${label}/${route}`);
       await page.screenshot({ path: `test-results/live-${label}-${route.replaceAll("/", "-") || "home"}.png`, fullPage: true });
     }
@@ -66,6 +73,13 @@ try {
   await page.getByRole("button", { name: "Reabrir etapa", exact: true }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Reabrir etapa", exact: true }).click();
   await expect(page.getByText("Etapa reaberta. O andamento foi atualizado.")).toBeVisible();
+  await page.goto(`${site}#/notifications`, { waitUntil: "networkidle" });
+  const notice = page.locator(".notification").filter({ hasText: title });
+  await expect(notice).toBeVisible();
+  await notice.getByRole("button", { name: "Marcar como lida" }).click();
+  await expect(notice).toHaveCount(0);
+  await page.goto(`${site}#/chapters/${chapter.id}`, { waitUntil: "networkidle" });
+  await manage.locator("summary").first().click();
   await page.getByRole("button", { name: "Cancelar produção", exact: true }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Cancelar produção", exact: true }).click();
   await expect(page.locator(".chapter-state")).toHaveText("Produção cancelada");
