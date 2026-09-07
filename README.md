@@ -1,6 +1,6 @@
 # Project Nox Scan Staff
 
-Painel privado de produção para a staff da Project Nox. O frontend é React + TypeScript + Vite e pode ser hospedado no GitHub Pages; dados, arquivos e autorização ficam no Supabase, protegidos por RLS.
+Painel privado de produção para a staff da Project Nox. O frontend é React + TypeScript + Vite no GitHub Pages. Dados e autorização ficam no Supabase, protegidos por RLS. Arquivos grandes usam o canal privado STAFF SCAN através de uma ponte autenticada no Cloudflare; arquivos antigos continuam no Supabase Storage.
 
 ## O que entrega
 
@@ -10,7 +10,7 @@ Painel privado de produção para a staff da Project Nox. O frontend é React + 
 - Notificações persistentes por cargo e avisos por e-mail via outbox, Edge Function e Resend quando uma etapa é liberada.
 - Catálogo editorial separado da produção; o workflow nasce somente quando um Raw Provider assume um item.
 - Arquivos e capas privados, versões reservadas com lock, créditos imutáveis, comentários, atividade, notificações e Realtime.
-- Abstração de storage: Supabase Storage hoje; `TelegramStorageProvider` reservado para uma futura Edge Function/serviço seguro.
+- Upload e download com progresso, provider selecionado pelo backend e compatibilidade entre Telegram e Supabase Storage.
 
 ## Segurança
 
@@ -41,7 +41,7 @@ Administradores gerenciam convites, cargos e ativação no painel. O banco imped
 6. Copie `.env.example` para `.env.local`, preenchendo URL e anon key. Não versione esse arquivo.
 7. Faça login uma vez como `Awerkori`, execute o SQL de bootstrap acima e teste uma conta não autorizada: ela deve receber “Acesso não autorizado” e não obter linhas privadas.
 
-O bucket `scan-artifacts` é privado e é criado pela migration. Para integrar Telegram futuramente, implemente a operação numa Edge Function/serviço confiável e registre `provider='telegram'` e `provider_key`; nenhum token Telegram pertence ao browser.
+O bucket `scan-artifacts` permanece privado para arquivos antigos. A integração Telegram está descrita em [Storage Telegram](workers/telegram-storage/README.md); nenhum token Telegram pertence ao browser.
 
 ## Desenvolvimento
 

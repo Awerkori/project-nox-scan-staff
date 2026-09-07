@@ -1,12 +1,14 @@
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
 import type { Stage } from "../types";
+import { downloadStoredArtifact, uploadStoredArtifact, type TransferProgress } from "./storage";
 
 export type ArtifactInput = {
   chapterId: string;
   stage: Stage;
   file: File;
   note?: string;
+  onProgress?: TransferProgress;
 };
 
 function client() {
@@ -116,14 +118,8 @@ export async function uploadArtifact(input: ArtifactInput) {
     },
   );
   if (reserveError) throw reserveError;
-  const artifact = reserved as { id: string; provider_key: string };
-  const { error: uploadError } = await client()
-    .storage.from("scan-artifacts")
-    .upload(artifact.provider_key, input.file, {
-      upsert: false,
-      contentType: input.file.type || undefined,
-    });
-  if (uploadError) throw uploadError;
+  const artifact = reserved as { id: string; provider: string; provider_key: string };
+  await uploadStoredArtifact(artifact, input.file, input.onProgress);
   const { data, error } = await client().rpc("finalize_artifact_upload", {
     p_artifact_id: artifact.id,
   });
@@ -131,18 +127,8 @@ export async function uploadArtifact(input: ArtifactInput) {
   return data;
 }
 
-export async function downloadArtifact(provider: string, key: string) {
-  if (provider !== "supabase")
-    throw new Error("Este provedor ainda não permite download pelo painel.");
-  const { data, error } = await client()
-    .storage.from("scan-artifacts")
-    .createSignedUrl(key, 300, { download: true });
-  if (error) throw error;
-  const link = document.createElement("a");
-  link.href = data.signedUrl;
-  link.rel = "noopener";
-  link.download = "";
-  link.click();
+export async function downloadArtifact(provider: string, key: string, progress?: TransferProgress) {
+  await downloadStoredArtifact(provider, key, progress);
 }
 
 export function subscribeToProduction(

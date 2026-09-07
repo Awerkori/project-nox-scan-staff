@@ -5,6 +5,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
 import {
   Link,
@@ -52,6 +53,28 @@ export type PanelProps = {
   logout: () => void;
 };
 type Entry = { chapter: Chapter; stage: ChapterStage };
+function ArtifactDownload({ file, children, className, disabled = false }: {
+  file?: Artifact; children: ReactNode; className?: string; disabled?: boolean;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [percent, setPercent] = useState(0);
+  const [error, setError] = useState("");
+  const pending = useRef(false);
+  const download = async () => {
+    if (!file || pending.current) return;
+    pending.current = true; setBusy(true); setPercent(0); setError("");
+    try {
+      await downloadArtifact(file.provider, file.provider_key, (done, total) => setPercent(Math.round(done / total * 100)));
+    } catch (cause) { setError(messageOf(cause)); }
+    finally { pending.current = false; setBusy(false); }
+  };
+  return <>
+    <button className={className} disabled={disabled || busy || !file} aria-busy={busy} onClick={() => void download()}>
+      {busy ? <strong role="status">Baixando… {percent}%</strong> : children}
+    </button>
+    {error && <Feedback kind="error">{error}</Feedback>}
+  </>;
+}
 const NoticeContext = createContext<(message: string) => void>(() => undefined);
 const groups = [
   [
@@ -762,6 +785,7 @@ function StageWorkCard({
 }) {
   const notify = useContext(NoticeContext);
   const fileInput = useRef<HTMLInputElement>(null);
+  const [transferPercent, setTransferPercent] = useState(0);
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState<{
     kind: "error" | "success";
@@ -800,7 +824,10 @@ function StageWorkCard({
     run(
       "upload",
       async () => {
-        await uploadArtifact({ chapterId: entry.chapter.id, stage, file });
+        setTransferPercent(0);
+        await uploadArtifact({ chapterId: entry.chapter.id, stage, file,
+          onProgress: (done, total) => setTransferPercent(Math.round(done / total * 100)),
+        });
         if (fileInput.current) fileInput.current.value = "";
         await reloadFiles();
       },
@@ -843,28 +870,18 @@ function StageWorkCard({
             </Feedback>
           )}
         {dependencies.map((dependency, index) => (
-          <button
+          <ArtifactDownload
             className="action-button download-action"
             disabled={!!busy}
             key={dependency.id}
-            onClick={() =>
-              void run(
-                `download-${dependency.id}`,
-                () =>
-                  downloadArtifact(
-                    dependency.provider,
-                    dependency.provider_key,
-                  ),
-                "Download iniciado.",
-              )
-            }
+            file={dependency}
           >
             <span>{index + 1}</span>
             <div>
               <strong>Baixar {stageLabel[dependency.stage]}</strong>
               <small>Versão {dependency.version}</small>
             </div>
-          </button>
+          </ArtifactDownload>
         ))}
         {stage !== "REVIEW" ? (
           <>
@@ -893,7 +910,7 @@ function StageWorkCard({
                 disabled={!!busy}
                 onClick={() => fileInput.current?.click()}
               >
-                {busy === "upload" ? "Enviando…" : "Fazer upload"}
+                {busy === "upload" ? `Enviando… ${transferPercent}%` : "Fazer upload"}
               </button>
             </div>
             <button
@@ -930,19 +947,13 @@ function StageWorkCard({
         )}
       </div>
       {current && (
-        <button
+        <ArtifactDownload
           className="uploaded-file secondary"
           disabled={!!busy}
-          onClick={() =>
-            void run(
-              "download-current",
-              () => downloadArtifact(current.provider, current.provider_key),
-              "Download iniciado.",
-            )
-          }
+          file={current}
         >
           ✓ Arquivo enviado · v{current.version} · Baixar
-        </button>
+        </ArtifactDownload>
       )}
       {["TYPESET", "REVIEW"].includes(stage) && (
         <Credits
@@ -1109,19 +1120,13 @@ function Ready({ chapters, refresh, publicationAvailable = true }: PanelProps) {
                     </small>
                   </div>
                   <div className="publication-actions">
-                    <button
+                    <ArtifactDownload
                       className="primary big-action"
                       disabled={!file || !!busy || loading}
-                      onClick={() =>
-                        file &&
-                        void downloadArtifact(
-                          file.provider,
-                          file.provider_key,
-                        ).catch((cause) => setError(messageOf(cause)))
-                      }
+                      file={file}
                     >
                       Baixar arquivo final
-                    </button>
+                    </ArtifactDownload>
                     <button
                       className="publish-action big-action"
                       disabled={!file || !!busy || !publicationAvailable}
@@ -1197,19 +1202,13 @@ function Published({ chapters, publicationAvailable = true }: PanelProps) {
                     </small>
                   </div>
                   <div className="publication-actions">
-                    <button
+                    <ArtifactDownload
                       className="secondary big-action"
                       disabled={!file || loading}
-                      onClick={() =>
-                        file &&
-                        void downloadArtifact(
-                          file.provider,
-                          file.provider_key,
-                        ).catch((cause) => setError(messageOf(cause)))
-                      }
+                      file={file}
                     >
                       Baixar arquivo
-                    </button>
+                    </ArtifactDownload>
                     <Link
                       className="secondary big-action"
                       to={`/chapters/${chapter.id}`}
@@ -1582,21 +1581,18 @@ function Chapter({ member, refresh, chapters }: PanelProps) {
             {artifacts
               .filter((file) => file.stage === "TYPESET" && file.is_current)
               .map((file) => (
-                <button
+                <ArtifactDownload
                   className="action-button download-action"
                   key={file.id}
-                  onClick={() =>
-                    void run(`download-${file.id}`, () =>
-                      downloadArtifact(file.provider, file.provider_key),
-                    )
-                  }
+                  file={file}
+                  disabled={!!busy}
                 >
                   <span>1</span>
                   <div>
                     <strong>Baixar Type para revisar</strong>
                     <small>Versão {file.version}</small>
                   </div>
-                </button>
+                </ArtifactDownload>
               ))}
             <div className="review-decisions">
               <button
@@ -1702,17 +1698,13 @@ function Chapter({ member, refresh, chapters }: PanelProps) {
                         {file.original_name} · {formatBytes(file.byte_size)}
                       </small>
                     </div>
-                    <button
+                    <ArtifactDownload
                       className="secondary"
                       disabled={!!busy}
-                      onClick={() =>
-                        void run(`download-${file.id}`, () =>
-                          downloadArtifact(file.provider, file.provider_key),
-                        )
-                      }
+                      file={file}
                     >
                       Baixar
-                    </button>
+                    </ArtifactDownload>
                   </article>
                 ))
               ) : (

@@ -1,0 +1,13 @@
+{
+  "name": "nox-staff-artifacts",
+  "main": "index.ts",
+  "compatibility_date": "2026-09-06",
+  "workers_dev": true,
+  "account_id": "45bedc39184a07fd7f989107bd686e63",
+  "observability": { "enabled": true },
+  "vars": {
+    "SUPABASE_URL": "https://pgumtergvtbeepzpgvkv.supabase.co",
+    "STAFF_ORIGIN": "https://awerkori.github.io",
+    "TELEGRAM_CHAT_ID": "-1004440522630"
+  }
+}
