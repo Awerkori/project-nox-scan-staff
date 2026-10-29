@@ -1,134 +1,83 @@
-# Project Nox Scan Staff
+# Project Nox · Central Staff
 
-Painel privado de produção para a staff da Project Nox. O frontend é React + TypeScript + Vite no GitHub Pages. Dados e autorização ficam no Supabase, protegidos por RLS. Arquivos grandes usam o canal privado STAFF SCAN através de uma ponte autenticada no Cloudflare; arquivos antigos continuam no Supabase Storage.
+Painel privado de gerenciamento editorial, controle de tarefas e fluxo de produção para a equipe do **Project Nox** (React, TypeScript, Vite, Supabase RLS, Edge Functions e Cloudflare Workers).
 
-## O que entrega
+---
 
-- Login somente com GitHub OAuth, convites por login e reivindicação segura para contas que já fizeram login.
-- Cargos múltiplos, filas automáticas por etapa e workflow RAW → Clean/Tradução paralelos → Type → QC → Pronto.
-- RPCs transacionais para assumir, concluir, reprovar e aprovar tarefas.
-- Notificações persistentes por cargo e avisos por e-mail via outbox, Edge Function e Resend quando uma etapa é liberada.
-- Catálogo editorial separado da produção; o workflow nasce somente quando um Raw Provider assume um item.
-- Arquivos e capas privados, versões reservadas com lock, créditos imutáveis, comentários, atividade, notificações e Realtime.
-- Upload e download com progresso, provider selecionado pelo backend e compatibilidade entre Telegram e Supabase Storage.
+🌐 **Painel de Produção (Acesso Restrito):** [awerkori.github.io/project-nox-scan-staff](https://awerkori.github.io/project-nox-scan-staff/)
 
-## Segurança
+---
 
-O site no Pages não contém token privilegiado. Use somente `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY`; a anon key é pública por design e a proteção é feita pelas políticas RLS. Nunca use `service_role`, segredo OAuth ou token Telegram no cliente.
+## 🎯 Para quem é este repositório?
 
-Usuários autenticados não entram automaticamente: só existem dados visíveis depois de constarem em `staff_members` como ativos. O bootstrap do primeiro administrador é manual e seguro, após o primeiro login OAuth de `Awerkori`:
+Este repositório é uma aplicação interna dedicada à **equipe editorial e de scanlation do Project Nox** (Raw Providers, Tradutores, Revisores, Cleaners/Redrawers, Typesetters, QCs e Administradores).
 
-```sql
-insert into public.staff_members(user_id, github_login, display_name, is_active, is_admin)
-select id, github_login, coalesce(display_name, 'Awerkori'), true, true
-from public.profiles where lower(github_login) = 'awerkori';
+> [!NOTE]
+> Se você procura a **plataforma pública de leitura de mangás**, acesse:  
+> ➡️ [**Project Nox · Plataforma Web de Mangá**](https://github.com/Awerkori/project-nox-manga)  
+> Para extensões móveis (Mihon): [**manga-extensoes**](https://github.com/Awerkori/manga-extensoes).
 
-insert into public.user_roles(user_id, role_code)
-select user_id, 'ADMIN' from public.staff_members
-where lower(github_login) = 'awerkori'
-on conflict do nothing;
-```
+---
 
-Administradores gerenciam convites, cargos e ativação no painel. O banco impede a remoção concorrente do último administrador ativo; a migration é a fonte da verdade para RLS e integridade.
+## 🚀 Funcionalidades da Central
 
-## Configuração Supabase
+- **Controle de Acesso Estrito:** Autenticação via GitHub OAuth com whitelist controlada por Row Level Security (RLS) no Supabase.
+- **Workflow Linear & Paralelo:** Fluxo de produção estruturado em etapas:
+  - RAW → Clean / Redraw e Tradução / Revisão em paralelo → Typesetting → Quality Check (QC) → Pronto para Publicação.
+- **RPCs Transacionais Atômicas:** Funções PostgreSQL dedicadas para assumir (`claim_stage`), devolver, aprovar e reprovar etapas sem condições de corrida.
+- **Armazenamento Híbrido Resiliente:** Upload de arquivos e partes através do worker de transporte privado (Telegram Storage) e Supabase Storage histórico.
+- **Notificações em Tempo Real:** Atualizações reativas via Supabase Realtime para a equipe por cargo e etapa liberada.
 
-1. Crie um projeto Supabase.
-2. Aplique em ordem somente as migrations pendentes de [`supabase/migrations`](supabase/migrations). Nunca reexecute migrations já aplicadas. O histórico remoto foi reconciliado com as cinco migrations antigas aplicadas manualmente; publicação, integridade/Auth e confiabilidade de e-mail foram aplicadas pela CLI em 05/09/2026.
-3. Em **Authentication → Providers**, habilite GitHub e informe Client ID/secret somente no Supabase.
-4. Configure a callback OAuth indicada pelo Supabase (normalmente `https://<project-ref>.supabase.co/auth/v1/callback`) no GitHub OAuth App.
-5. Em **Authentication → URL Configuration**, adicione `https://awerkori.github.io/project-nox-scan-staff/` e a URL local de desenvolvimento como redirect URLs.
-6. Copie `.env.example` para `.env.local`, preenchendo URL e anon key. Não versione esse arquivo.
-7. Faça login uma vez como `Awerkori`, execute o SQL de bootstrap acima e teste uma conta não autorizada: ela deve receber “Acesso não autorizado” e não obter linhas privadas.
+---
 
-O bucket `scan-artifacts` permanece privado para arquivos antigos. A integração Telegram está descrita em [Storage Telegram](workers/telegram-storage/README.md); nenhum token Telegram pertence ao browser.
+## 🔒 Segurança e Autorização
 
-## Desenvolvimento
+O frontend hospedado no GitHub Pages não contém tokens privilegiados:
+- Utiliza unicamente as credenciais públicas do cliente (`VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY`).
+- Todas as tabelas são blindadas com **Row Level Security (RLS)** ativo.
+- Usuários autenticados no GitHub só visualizam dados e tarefas se constarem expressamente na tabela `public.staff_members` como membros ativos.
+- O token da role administrativa (`service_role`), segredos de OAuth e bots permanecem restritos aos ambientes de backend.
 
+---
+
+## 💻 Desenvolvimento Local
+
+### Pré-requisitos
+- **Node.js** 20+ e `npm`
+- Projeto Supabase com as migrações aplicadas
+
+### Instalação e Execução
 ```bash
+# Instalar dependências
 npm install
-npm run lint
-npm run test
-npm run build
+
+# Configurar variáveis de ambiente
+cp .env.example .env.local
+# Preencha VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY
+
+# Iniciar servidor local
 npm run dev
+
+# Executar testes unitários e de fluxo
+npm run test
+
+# Gerar build estático
+npm run build
 ```
 
-Os testes em [`src/workflow.test.ts`](src/workflow.test.ts) cobrem a regra central: RAW libera Clean e Tradução; Type só abre quando ambos terminam; QC aprova para Ready ou reprova de volta para a etapa escolhida. As funções SQL são a proteção efetiva contra conflito de tarefa e permissões no ambiente real.
+---
 
-### Reserva de tarefa e notificações
+## 🔗 Ecossistema Project Nox
 
-`claim_stage` bloqueia a linha com `FOR UPDATE`, exige o cargo da etapa e só aceita estado `AVAILABLE`. O índice parcial `one_active_assignment_per_stage` é uma segunda barreira: dois cliques simultâneos não podem resultar em dois responsáveis ativos. O perdedor recebe a mensagem de conflito da RPC.
+- 🌐 [**Project Nox · Plataforma Web de Mangá**](https://github.com/Awerkori/project-nox-manga) — Plataforma web oficial para leitura pública.
+- ⚙️ [**Project Nox · Importer**](https://github.com/Awerkori/project-nox-importer) — Serviço de ingestão contínua 24/7.
+- 📦 [**Project Nox · Extensões de Mangá**](https://github.com/Awerkori/manga-extensoes) — Repositório de extensões para leitores móveis.
+- 💻 [**Project Nox · Código-fonte das Extensões de Mangá**](https://github.com/Awerkori/manga-fonte-extensoes) — Código em Kotlin das extensões.
+- 🎫 [**Project Nox · Central de Pedidos**](https://github.com/Awerkori/project-nox-requests) — Reporte de erros e solicitações.
+- 📊 [**Project Nox · Tracker**](https://awerkori.github.io/project-nox-tracker/) — Dashboard público de status.
 
-Ao ocorrer uma transição real para `AVAILABLE`, o banco avisa os membros ativos do cargo correspondente (e administradores no site). RAW libera Clean e Tradução em paralelo; Clean + Tradução liberam Type; Type libera QC. Devolver uma tarefa à fila não dispara outro e-mail da mesma liberação. Renderizações, reloads e Realtime não criam notificações.
+---
 
-### E-mails de produção
+## ⚖️ Licença e Governança
 
-**Estado atual: e-mail opcional desligado, custo R$0.** Notificações internas são o método principal: continuam sendo criadas pelo backend, protegidas por destinatário/cargo e atualizadas no site por Realtime/refetch. Não dependem de domínio, Resend ou e-mail do membro.
-
-As migrations `20260905030000` e `20260905040000` adicionam uma configuração protegida, desativada por padrão. Quando desligada, nenhuma liberação gera outbox; o processamento não reserva envios nem chama o provedor, e o cron de e-mail é removido. Tentativas anteriores são **CANCELLED**, sem erro e sem exclusão do histórico. Não voltam à fila quando o recurso for habilitado. Configurações mostra apenas “E-mail opcional — Desativado”.
-
-A migration `20260904240000_catalog_management_and_email_outbox.sql` cria uma outbox durável, deduplicada por etapa/liberação/destinatário. O webhook assíncrono tenta acordar a Edge Function imediatamente e um cron por minuto recupera falhas. O workflow nunca aguarda o Resend.
-
-Depois de aplicar a migration:
-
-```bash
-supabase functions deploy send-production-emails --no-verify-jwt
-supabase secrets set RESEND_API_KEY=re_... RESEND_FROM="Project Nox <staff@seudominio.com>" EMAIL_WORKER_SECRET=um-segredo-forte STAFF_APP_URL=https://awerkori.github.io/project-nox-scan-staff/
-```
-
-Cadastre no Vault do projeto a URL e o mesmo segredo do worker:
-
-```sql
-select vault.create_secret('https://SEU-PROJETO.supabase.co', 'project_url');
-select vault.create_secret('O-MESMO-EMAIL_WORKER_SECRET', 'email_worker_secret');
-```
-
-`RESEND_API_KEY` e `EMAIL_WORKER_SECRET` existem somente nos secrets da Edge Function/Vault. O remetente precisa usar um domínio verificado no Resend. Falhas e tentativas ficam disponíveis para administradores em `production_email_outbox.last_error` e não alteram o estado do capítulo.
-
-**Sem domínio próprio (modo de teste):** configure `RESEND_FROM="Project Nox <onboarding@resend.dev>"`. A função reconhece esse remetente e pausa o processamento de destinatários reais **antes** de reservar a fila: não consome tentativas, não redireciona mensagens privadas e não marca avisos como enviados. Notificações no site e produção continuam funcionando.
-
-`node scripts/email-worker.mjs test` envia uma mensagem sintética para `delivered@resend.dev`, o destinatário oficial de simulação do Resend. Exige o segredo do worker, usa idempotência e não altera a outbox. Um retorno `accepted: true` comprova aceitação pela API, **não recebimento na caixa de uma pessoa**. `diagnose` informa `testMode`; `run` retorna HTTP 202 enquanto o remetente for de teste.
-
-Para habilitar destinatários reais **somente se desejado no futuro**, verifique seu domínio em [Resend → Domains](https://resend.com/domains), cadastrando os registros DNS indicados até aparecer **Verified**. Troque o secret `RESEND_FROM` por `Project Nox <staff@seudominio.com>` e execute pelo backend autorizado `update public.production_email_settings set enabled=true where id;`. O cron é recriado automaticamente; apenas novas liberações geram avisos. Não exige frontend novo ou migration. Para desligar novamente, altere `enabled=false`: fila ativa cancelada e cron removido. A configuração não é editável pelo navegador, nem por um membro administrador. O domínio compartilhado de teste [não permite enviar para outros membros](https://resend.com/docs/knowledge-base/403-error-resend-dev-domain).
-
-## Deploy
-
-O workflow [`deploy-pages.yml`](.github/workflows/deploy-pages.yml) executa lint, testes e build antes de publicar no GitHub Pages. Defina o Pages do repositório como **GitHub Actions**. As variáveis públicas `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY` devem ser adicionadas como Variables/Secrets de Actions antes do primeiro deploy funcional; elas não são suficientes para burlar RLS.
-
-O app usa `HashRouter`, portanto URLs do Pages não sofrem 404 em rotas internas. URL prevista: `https://awerkori.github.io/project-nox-scan-staff/`.
-
-## Validação da revisão de UX
-
-### Polimento visual e exclusão de obras
-
-O ícone oficial foi convertido para PNGs de 192 e 48 px com transparência, a partir de `Downloads/nox icone site.png`; o original não foi modificado. Capas usam `contain`. O fundo usa 12 pontos CSS minúsculos (6 em telas pequenas), sem textura móvel de tela inteira, vídeos, canvas ou loop JavaScript; respeita movimento reduzido. Menus usam popovers nativos na camada superior do navegador e fecham por Escape/clique externo.
-
-O catálogo ordena todos os capítulos carregados antes de paginar, decrescente por padrão. Na Home, as etapas paralelas aparecem juntas com estado e responsável; capítulos publicados continuam fora da lista.
-
-A migration incremental `20260907200000_work_deletion.sql` oferece `admin_delete_work`, exige admin ativo e o título exato como confirmação. Exclui catálogo e produção associada, mas **nunca apaga arquivos externos**. Referências de capas, artifacts e partes ficam preservadas em `work_deletion_audit`, acessível somente pelo backend autorizado; a interface não recebe referências privadas do Telegram. DELETE direto de obras pelo navegador foi bloqueado para evitar contornar a confirmação e a auditoria. Arquivar usa o estado existente “Pausada”, sem alterar o workflow de capítulos já iniciados.
-
-`tests/remote-work-deletion.sql` verifica a nova operação em transação revertida. O teste publicado usa apenas uma obra temporária própria; a obra `TESTE TÉCNICO — Telegram Storage` não é apagada automaticamente.
-
-### Administração e pendências
-
-A migration `20260907010000_admin_controls_and_pending_notifications.sql` acrescenta ferramentas administrativas protegidas no banco. **Cancelar produção** devolve o catálogo a “A fazer” e preserva arquivos, versões, créditos e histórico. Reiniciar reutiliza o mesmo capítulo, exigindo um novo envio. **Reabrir etapa** invalida somente a etapa e suas dependências; **despublicar** devolve para “Pra upar”. Reatribuir exige um membro ativo com o cargo correto.
-
-**Excluir capítulo** exige confirmação digitada, remove os registros associados no banco e mantém uma auditoria restrita a administradores. Arquivos externos não são apagados. Nenhuma dessas operações altera o transporte Telegram ou os arquivos antigos do Supabase.
-
-Notificações exibem somente pendências não lidas e atuais. Assumir uma tarefa arquiva a oferta para todos; devolver restaura a oferta. Publicar ou cancelar arquiva os avisos do capítulo. O histórico permanece na central do capítulo, separado da caixa de pendências.
-
-`npm run test:admin` testa essas operações, permissões negativas, confirmação de exclusão, créditos preservados, dependências reabertas e concorrência em PostgreSQL isolado. Também é obrigatório no deploy.
-
-`supabase db query --linked --file tests/remote-administration.sql` valida administração e pendências no remoto com rollback integral. `node scripts/test-admin-live.mjs` exige CLI autenticada e testa o site publicado com uma sessão administrativa em memória: percorre todas as telas em cinco larguras e executa as novas ações somente em uma obra temporária exclusiva do teste, removida ao terminar. Não modifica obras existentes nem o storage. Não equivale a testar o login GitHub de terceiros.
-
-Validação de 07/09/2026: 33 testes unitários, 83 verificações de workflow/RLS, 87 administrativas e 20 de metadata Telegram passaram, além do ciclo de navegador com todos os retornos de QC. A migration administrativa foi aplicada e validada no Supabase, sem erros no `db lint`. No Pages publicado, 14 telas passaram em 2560, 1920, 1280, 820 e 390 px; catálogo preenchido, devolver/reatribuir/reabrir/cancelar/excluir e leitura de notificação foram exercitados com dados temporários. Console sem erros e dados temporários removidos; nenhum arquivo ou capítulo existente foi alterado.
-
-`npm run test:db` cria um banco **novo e exclusivamente local** em `127.0.0.1:55432`, usando o usuário do sistema com permissão de criar bancos/roles. Não aponta para produção, não apaga bancos existentes e executa todas as migrations, RLS e RPCs. Auth/Storage têm schemas compatíveis; apenas pg_net, cron e Vault são simulados.
-
-`npm run test:browser` usa o React real e esse PostgreSQL com contas separadas por cargo. Percorre upload, conclusão, os três retornos de QC, publicação, rotas negadas e layouts desktop/notebook/mobile. O envelope HTTP do Supabase, a sessão OAuth e o transporte de arquivos são locais; isso **não comprova login externo ou entrega real de e-mail**. Screenshots ficam em `test-results/` (ignoradas pelo Git). Os dois testes são obrigatórios no deploy do Pages.
-
-`tests/remote-smoke.sql` valida as identidades confirmadas de administrador e Typesetter, bloqueios de RPC, proteção do último admin e reentrada no banco remoto. Todas as escritas de teste são revertidas.
-
-`node scripts/check-production.mjs` abre o Pages publicado em três larguras, verifica o console, o encaminhamento ao GitHub e a negação de acesso anônimo às tabelas/RPCs privadas. Não autentica em nome de outra pessoa nem altera dados. O login GitHub completo precisa ser confirmado pelo titular da conta.
-
-`node scripts/email-worker.mjs setup /caminho/privado/worker.env` configura somente o segredo do worker e URL no Vault/Edge Function, sem imprimir valores. O arquivo deve conter `EMAIL_WORKER_SECRET` (64 caracteres hexadecimais) e `STAFF_APP_URL`; proteja-o e remova-o após a configuração. `diagnose` consulta a configuração e os domínios no Resend; uma chave restrita a envio não pode listar domínios. `run` processa a fila. O remetente deve estar configurado como `RESEND_FROM`. Tentativas usam chave de idempotência estável, backoff e limite de repetição; falhas do disparador ficam em `email_worker_diagnostics`.
+Software de gestão interna do Project Nox. Uso exclusivo para membros autorizados da equipe de tradução e edição.
