@@ -15,7 +15,7 @@ Este repositório é uma aplicação interna dedicada à **equipe editorial e de
 > [!NOTE]
 > Se você procura a **plataforma pública de leitura de mangás**, acesse:  
 > ➡️ [**Project Nox · Plataforma Web de Mangá**](https://github.com/Awerkori/project-nox-manga)  
-> Para extensões móveis (Mihon): [**manga-extensoes**](https://github.com/Awerkori/manga-extensoes).
+> Para extensões em leitores móveis (**Mihon e forks**): [**manga-extensoes**](https://github.com/Awerkori/manga-extensoes).
 
 ---
 
@@ -71,10 +71,17 @@ npm run build
 
 - 🌐 [**Project Nox · Plataforma Web de Mangá**](https://github.com/Awerkori/project-nox-manga) — Plataforma web oficial para leitura pública.
 - ⚙️ [**Project Nox · Importer**](https://github.com/Awerkori/project-nox-importer) — Serviço de ingestão contínua 24/7.
-- 📦 [**Project Nox · Extensões de Mangá**](https://github.com/Awerkori/manga-extensoes) — Repositório de extensões para leitores móveis.
+- 📦 [**Project Nox · Extensões de Mangá**](https://github.com/Awerkori/manga-extensoes) — Distribuição de extensões para Mihon e forks.
 - 💻 [**Project Nox · Código-fonte das Extensões de Mangá**](https://github.com/Awerkori/manga-fonte-extensoes) — Código em Kotlin das extensões.
 - 🎫 [**Project Nox · Central de Pedidos**](https://github.com/Awerkori/project-nox-requests) — Reporte de erros e solicitações.
 - 📊 [**Project Nox · Tracker**](https://awerkori.github.io/project-nox-tracker/) — Dashboard público de status.
+
+---
+
+## 🌟 Créditos
+
+- **Project Nox**: Concepção e arquitetura do fluxo editorial e painel da equipe.
+- Equipe interna de tradução, edição e controle de qualidade do Project Nox.
 
 ---
 
