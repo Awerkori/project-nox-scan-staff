@@ -1,0 +1,42 @@
+Project Nox · Central Staff Portal
+Copyright (C) 2026 Project Nox Contributors & Awerkori
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, version 3 of the License (GPL-3.0-only).
+
+SPDX-License-Identifier: GPL-3.0-only
+
+================================================================================
+1. ESCLARECIMENTO SOBRE LICENCIAMENTO (GPL-3.0 vs. AGPL-3.0)
+================================================================================
+Este repositório está oficialmente licenciado sob a GNU General Public
+License versão 3.0 (GPL-3.0-only).
+
+Sinalização expressa de escopo copyleft:
+A GNU GPL versão 3.0 não contém a cláusula de interação remota presente na
+Seção 13 da GNU Affero General Public License (AGPL-3.0). Em conformidade com
+os termos da GPLv3, a execução modificada desta interface e painel editorial
+em servidores internos sem distribuição direta de cópias executáveis ou de
+código-fonte a terceiros não impõe a obrigação de disponibilização compulsória
+do código-fonte modificado sob a GPL 3.0. A escolha da GPL 3.0 promove a
+liberdade do software para colaboração, estudo e redistribuição.
+
+================================================================================
+2. COMPONENTES E DEPENDÊNCIAS DE TERCEIROS
+================================================================================
+Este software faz uso de bibliotecas de código aberto permissivas compatíveis
+com a GNU GPLv3:
+- React (react, react-dom) — Licença MIT (Copyright (c) Meta Platforms, Inc.)
+- React Router (react-router-dom) — Licença MIT (Copyright (c) Remix Software)
+- Supabase JS Client (@supabase/supabase-js) — Licença MIT (Copyright (c) Supabase)
+- Fontes tipográficas DM Sans / Marcellus — SIL Open Font License 1.1
+
+================================================================================
+3. RESERVA DE MARCA E IDENTIDADE VISUAL
+================================================================================
+A concessão da licença GPL 3.0 aplica-se exclusivamente aos direitos autorais
+de software. NENHUM direito sobre marcas comerciais, logotipos oficiais ou
+identidade do "Project Nox" ou de "Awerkori" é concedido por esta licença.
+É estritamente vedada a utilização desses sinais para sugerir endosso oficial
+ou representação da equipe do Project Nox.
