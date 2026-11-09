@@ -85,6 +85,28 @@ npm run build
 
 ---
 
-## ⚖️ Licença e Governança
+## ⚖️ Licença e Copyright
 
-Software de gestão interna do Project Nox. Uso exclusivo para membros autorizados da equipe de tradução e edição.
+Este projeto é software livre licenciado sob os termos da **GNU Affero General Public License versão 3.0** (`AGPL-3.0-only`). Consulte o arquivo [LICENSE](LICENSE) para obter o texto integral inalterado da licença e o arquivo [NOTICE](NOTICE) para informações detalhadas de autoria, dependências e termos de uso.
+
+```
+Copyright (C) 2026 Project Nox Contributors & Awerkori
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, version 3 of the License.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+```
+
+### 📌 Interação Remota de Rede (GNU AGPLv3 Seção 13)
+O Project Nox adota oficialmente a licença **GNU AGPL versão 3.0**. Nos termos da Seção 13 da AGPLv3, qualquer versão modificada deste portal operada em servidores ou instâncias acessíveis remotamente através de uma rede de computadores deve disponibilizar a todos os usuários remotos a oportunidade de obter o Código-Fonte Correspondente (Corresponding Source) da versão em execução, sem cobrança e através de meio habitual de disponibilização de software em rede.
+
+### 🛡️ Proteção de Identidade e Marca (AGPLv3 Seção 7(e))
+A concessão da licença AGPLv3 refere-se estritamente aos direitos autorais do software. Os nomes "Project Nox" e "Awerkori", bem como logotipos associados, identificam a procedência e origem do projeto. A licença **não concede** autorização para o uso de tais sinais distintivos para insinuar homologação, endosso ou representação oficial da equipe interna sem autorização prévia por escrito.
+
+### ⚖️ Governança Operacional
+Embora o código seja aberto sob a AGPL 3.0 para estudo e colaboração comunitária, o acesso aos ambientes de produção, credenciais e sessões editoriais da equipe de tradução/edição do Project Nox é restrito aos membros autorizados.
